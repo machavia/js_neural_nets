@@ -19,13 +19,27 @@
               <option value="checker">checker</option>
               <option value="mnist">mnist</option>
             </select>
-            <fieldset id="fset">
-                seq_len: <input
+            <fieldset id="dat_fset">
+                train_size: <input
+                    id='train_size' type='text' value=1000 name="seq_len"
+                    style="width: 50px"
+                \>
+                test_size: <input
+                    id='test_size' type='text' value=10
+                    style="width: 50px"
+                \>
+            </fieldset>
+            <fieldset id="pal_fset">
+                half_len: <input
                     id='seq_len' type='text' value=1 name="seq_len"
                     style="width: 50px"
                 \>
                 vocab_size: <input
                     id='vocab_size' type='text' value=2
+                    style="width: 50px"
+                \>
+                noise: <input
+                    id='noise' type='text' value=0
                     style="width: 50px"
                 \>
             </fieldset>
@@ -34,9 +48,11 @@
           <div>
 
             algo: <select id='algo'>
-              <option value="lstm">lstm</option>
-              <option value="perceptron">perceptron</option>
-              <option value="ffn">ffn</option>
+              <option value="lstm_synaptic">lstm_synaptic</option>
+              <option value="lstm_brain">lstm_brain</option>
+              <option value="perceptron_synaptic">perceptron_synaptic</option>
+              <option value="ffn_synaptic">ffn_synaptic</option>
+              <option value="ffn_brain">ffn_brain</option>
             </select> 
 
             <fieldset>
@@ -79,10 +95,6 @@
               <span class="sr-only">test</span>
             </button>
 
-            <button type="button" id='takum'>
-              <span class="sr-only">ripped</span>
-            </button>
-
           </div>
 
         </div>
@@ -97,6 +109,7 @@
 -->
 
 <script src="./bower_components/mnist/dist/mnist.js"></script>
+<script src="./bower_components/brain.js/browser.js"></script>
 <script src="jquery-3.2.1.min.js"></script>
 <script src="./synaptic.js"></script>
 <script src="neural_poc.js"></script>

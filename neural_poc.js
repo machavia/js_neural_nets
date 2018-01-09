@@ -22,19 +22,22 @@ var synaptic = require('synaptic')
 */
 
 
-function getRandSequence(seq_len=1000, vocab_size=6){
+function getRandSequence(seq_len=1000, vocab_size=6, noise=0){
     let seq = []
     for(i = 0; i < seq_len;  i += 1){
-        seq.push([Math.floor(Math.random() * vocab_size) + 1])
+        seq.push([
+            Math.floor(Math.random() * vocab_size) + 1 +
+            noise * (Math.random() - 0.5)
+        ])
     }
     return(seq)
 }
 
-function getPalindrome(vocab_size=10, seq_len=0){
+function getPalindrome(vocab_size=10, seq_len=0, noise=0){
     if(seq_len == 0){
         seq_len = Math.round(Math.random() * (5 - 1)) + 1;
     }
-    const first_half = getRandSequence(seq_len, vocab_size);
+    const first_half = getRandSequence(seq_len, vocab_size, noise);
     let i = first_half.length;
     let second_half = []
     while(i--){ second_half.push(first_half[i]) };
@@ -42,25 +45,31 @@ function getPalindrome(vocab_size=10, seq_len=0){
     return(seq);
 }
 
-function getNonPalindrome(vocab_size=10, seq_len=0){
+function getNonPalindrome(vocab_size=10, seq_len=0, noise=0){
     if(seq_len == 0){
         seq_len = Math.round(Math.random() * (5 - 1)) + 1;
     }
-    const first_half = getRandSequence(seq_len, vocab_size);
-    let second_half = getRandSequence(seq_len, vocab_size);
+    const first_half = getRandSequence(seq_len, vocab_size, noise);
+    let second_half = getRandSequence(seq_len, vocab_size, noise);
     let same = true;
     for(let i = 0; i < first_half.length; i++){
-        if(second_half[second_half.length - (i + 1)][0] != first_half[i][0]){
+        if(
+            Math.round(second_half[second_half.length - (i + 1)][0]) !=
+            Math.round(first_half[i][0])
+        ){
             same = false;
         }
     }
     if(same){
         ref_pos = Math.round(Math.random() * (seq_len - 1));
         change_pos = second_half.length - (ref_pos + 1);
-        while(second_half[change_pos][0] == first_half[ref_pos][0]){
+        while(
+            Math.round(second_half[change_pos][0]) ==
+            Math.round(first_half[ref_pos][0])
+        ){
              second_half[change_pos][0] = Math.floor(
                  Math.random() * vocab_size
-             ) + 1;
+             ) + 1 + noise * (Math.random() - 0.5);
         }
     }
     const seq = first_half.concat(second_half)
@@ -135,7 +144,28 @@ function draw_sequence(
 
 }
 
-function get_ffn({
+function get_ffn_brain({
+    input_size=1, hidden_size=[2], output_size=2
+}){
+
+    var net = new brain.NeuralNetwork({
+        hidden_layers: hidden_size
+    });
+    return(net)
+}
+
+function get_lstm_brain({
+    input_size=1, hidden_size=[2], output_size=2
+}){
+
+    var net = new brain.recurrent.LSTM({
+        hidden_layers: hidden_size
+    });
+    return(net)
+}
+
+
+function get_ffn_synaptic({
     input_size=1, hidden_size=[2], output_size=2
 }){
 
@@ -182,12 +212,17 @@ function sleep(time){
 }
 
 function getPalindromeDataset({
-    datasetSize=1000, flatten_input=true, seq_len=1, vocab_size=2
+    datasetSize=1000, flatten_input=true, seq_len=1, vocab_size=2,
+    noise=0
 }){
     let trainSet = []
     for(let i = 0; i < datasetSize / 2; i++){
-        let pal = getPalindrome(vocab_size=vocab_size, seq_len=seq_len);
-        let non_pal = getNonPalindrome(vocab_size=vocab_size, seq_len=seq_len);
+        let pal = getPalindrome(
+            vocab_size=vocab_size, seq_len=seq_len, noise=noise
+        );
+        let non_pal = getNonPalindrome(
+            vocab_size=vocab_size, seq_len=seq_len, noise=noise
+        );
         if(flatten_input){
             pal = [].concat(...pal);
             non_pal = [].concat(...non_pal);
@@ -198,14 +233,14 @@ function getPalindromeDataset({
     return(trainSet);
 }
 
-function getMNISTDataset(
+function getMNISTDataset({
     datasetSize=700
-){
+}){
     const set = mnist.set(datasetSize, 20);
     return(set.training);
 }
 
-function getCheckerDataset(datasetSize=1000){
+function getCheckerDataset({datasetSize=1000}){
 
     let trainSet = []
     for(let i = 0; i < datasetSize ; i++){
@@ -223,7 +258,7 @@ function getCheckerDataset(datasetSize=1000){
 }
 
 function learnModel({
-    model_type='ffn', hidden_size=[1],
+    model_type='ffn_synaptic', hidden_size=[1],
     rate=0.2, iterations=100, error=0.005, train_set_size=1000,
     trainSet=null, input_size=1, output_size=1
 }){
@@ -235,73 +270,94 @@ function learnModel({
     let model;
 
     switch(model_type){
-        case "lstm":
+        case "lstm_synaptic":
             model = new Architect.LSTM(
                 input_size, hidden_size, output_size
             );
             break;
-        case "perceptron":
+        case "perceptron_synaptic":
             model = new Architect.Perceptron(
-                input_size, hidden_size, output_size);
+                input_size, hidden_size, output_size
+            );
             break;
-        case "ffn":
-            model = get_ffn({
+        case "ffn_synaptic":
+            model = get_ffn_synaptic({
                 "input_size": input_size,
                 "hidden_size": hidden_size,
                 "output_size": output_size 
             });
             break
+        case 'ffn_brain':
+            model = get_ffn_brain({
+                "hidden_size": hidden_size,
+            });
+            break;
+        case 'lstm_brain':
+            model = get_lstm_brain({
+                "hidden_size": hidden_size,
+            });
+            break;
     }
 
-    const trainOptions = {
-        rate: rate,
-        iterations: iterations,
-        error: error,
-        cost: Trainer.cost.CROSS_ENTROPY, // Trainer.cost.BINARY,
-        log: true,
-        crossValidate: null
-    };
+    if(model_type.match('.*_synaptic')){
+        const trainOptions = {
+            rate: rate,
+            iterations: iterations,
+            error: error,
+            cost: Trainer.cost.CROSS_ENTROPY, // Trainer.cost.BINARY,
+            log: true,
+            crossValidate: null
+        };
 
-    const trainer = new Trainer(model);
-    const trainResults = trainer.train(trainSet, trainOptions);
+        const trainer = new Trainer(model);
+        const trainResults = trainer.train(trainSet, trainOptions);
 
-    console.log(trainSet);
-    console.log(trainResults);
+        console.log(trainSet);
+        console.log(trainResults);
+    }else if(model_type.match('.*_brain')){
+        model.train(
+            trainSet, {
+              errorThresh: 0.005,  // error threshold to reach
+              iterations: iterations,   // maximum training iterations
+              log: true,           // console.log() progress periodically
+              logPeriod: 10,       // number of iterations between logging
+              learningRate: rate    // learning rate
+            }
+        );
+    }
 
     return model
 }
 
 
-function draw_palindrome_batches({
-    canvas, context, curr, max, ms, model, flatten_input=false,
-    seq_len=1, vocab_size=2
+function test_batch({
+    canvas, context, curr, max, ms, model, testSet=null, model_type=null
 }){
 
     console.log(curr);
+    console.log('testSet:', testSet);
 
     context.clearRect(0, 0, canvas.width, canvas.height);
 
-    to_draw = [];
-    for(let i = 0; i < 10; i++){
-        pal = getPalindrome(vocab_size=vocab_size, seq_len=seq_len);
-        nonPal = getNonPalindrome(vocab_size=vocab_size, seq_len=seq_len);
-        if(flatten_input){
-            pal = [].concat(...pal);
-            nonPal = [].concat(...nonPal);
-        }
-        to_draw.push([pal, true]);
-        to_draw.push([nonPal, false]);
-    }
+    sub_height = canvas.height / testSet.length;
+    var to_draw_it = testSet.entries();
 
+    let pred;
 
-    sub_height = canvas.height / to_draw.length;
-    var to_draw_it = to_draw.entries();
-
-    for([idx, [seq, is_pal]] of to_draw_it){
+    for([idx, {input: seq, output: output}] of to_draw_it){
+        //seq = input;
+        is_pal = ! Boolean(output[0]);
         draw_sequence(
             seq, context, sub_height, sub_height * idx, set_color(is_pal)
         );
-        console.log(is_pal, model.activate(seq), seq);
+
+        if(model_type.match('.*_synaptic')){
+            pred = model.activate(seq)
+        }else if(model_type.match('.*_brain')){
+            pred = model.run(seq)
+        }
+
+        console.log(is_pal, pred, seq);
     }
     
     curr = curr + 1;
@@ -309,10 +365,12 @@ function draw_palindrome_batches({
     if(curr < max){
         console.log("+curr:", curr);
         console.log("+max:", max);
-        setTimeout(function(){ draw_palindrome_batches({
+        setTimeout(
+            () => test_batch({
             canvas: canvas, context: context, curr: curr, max: max, ms: ms,
             model: model, flatten_input: false, seq_len: 1, vocab_size: 2
-        })});
+            })
+        );
         // sleep(ms).then(draw_batches(curr, max))
     }else{
         console.log("curr:", curr);
@@ -320,68 +378,15 @@ function draw_palindrome_batches({
     }
 }
 
-function ripped_test(){
-    
-    const set = mnist.set(700, 20);
-
-    const trainingSet = set.training;
-    const testSet = set.test;
-
-    const Layer = synaptic.Layer;
-    const Network = synaptic.Network;
-    const Trainer = synaptic.Trainer;
-
-    const inputLayer = new Layer(784);
-    const hiddenLayer = new Layer(100);
-    const outputLayer = new Layer(10);
-
-    inputLayer.project(hiddenLayer);
-    hiddenLayer.project(outputLayer);
-
-    const myNetwork = new Network({
-        input: inputLayer,
-        hidden: [hiddenLayer],
-        output: outputLayer
-    });
-
-    const trainer = new Trainer(myNetwork);
-    trainer.train(trainingSet, {
-        rate: .2,
-        iterations: 20,
-        error: .1,
-        shuffle: true,
-        log: true,
-        cost: Trainer.cost.CROSS_ENTROPY
-    });
+var debug = {
+    trainSet: null,
+    testSet: null,
+    model: null
 }
-
 
 window.onload = function(){
 
     let ret = speed_test(100);
-    /*
-    let seq = ret.seq
-    let synaptic_LSTM = ret.LSTM
-
-    // seq.forEach(function(elt){console.log(elt);}}
-    
-    synaptic_LSTM.clear()
-    synaptic_LSTM.activate(...[seq.slice(0, 10)])
-
-    synaptic_LSTM.clear()
-    synaptic_LSTM.activate(...[seq.slice(10, 20)])
-
-    synaptic_LSTM.clear()
-    synaptic_LSTM.activate(seq.slice(0, 10))
-    synaptic_LSTM.activate(seq.slice(10, 20))
-    synaptic_LSTM.activate(seq.slice(0, 10))
-
-    let palindrome = getPalindrome(vocab_size=5)
-    console.log(''.concat(...palindrome))
-
-    let non_palindrome = getNonPalindrome(vocab_size=5)
-    console.log(''.concat(...non_palindrome))
-    */
 
     let canvas = document.createElement("canvas", id='canvas');
     document.body.appendChild(canvas);
@@ -394,22 +399,37 @@ window.onload = function(){
     var model;
 
     function flatten_setter(){
-        if($("#algo").val() == 'lstm'){
+        if(
+            $("#algo").val() == 'lstm_synaptic' ||
+            $("#algo").val() == 'lstm_brain'
+        ){
             return(false);
         }else{return(true)}
     }
 
-    function data_setter(datasetSize){
+    function data_setter(type='train', flatten=null){
+        if(flatten == null){
+            flatten = flatten_setter()
+        }
+        let datasetSize
+        if(type == 'train'){
+            datasetSize = $("#train_size").val()
+        }else{
+            datasetSize = $("#test_size").val()
+        }
+        datasetSize = parseInt(datasetSize)
         if($("#data").val() == 'palindrome'){
             return(getPalindromeDataset({
+                datasetSize: datasetSize,
                 seq_len: $("#seq_len").val(),
                 vocab_size: $("#vocab_size").val(),
-                flatten_input: flatten_setter()
+                flatten_input: flatten, 
+                noise: $("#noise").val()
             }));
-        }else if($("#data").val() == 'palindrome'){
-            return(getMNISTDataset());
+        }else if($("#data").val() == 'mnist'){
+            return(getMNISTDataset({datasetSize: datasetSize}));
         }else if($("#data").val() == 'checker'){
-            return(getCheckerDataset());
+            return(getCheckerDataset({datasetSize: datasetSize}));
         }
     }
 
@@ -418,38 +438,40 @@ window.onload = function(){
             currData = $(this).val();
             console.log(currData);
             if(currData == 'mnist'){
-                $("#algo").val('ffn')
+                $("#algo").val('ffn_synaptic')
 
                 $("#n_input").val(784);
                 $("#n_hidden").val(100);
                 $("#n_output").val(10);
 
-                $("#fset").attr("disabled", true);
-                $("#fset").hide();
+                $("#pal_fset").attr("disabled", true);
+                $("#pal_fset").hide();
             }else if(currData == 'palindrome'){
-                $("#algo").val('lstm')
+                $("#algo").val('lstm_synaptic')
 
                 $("#n_input").val(1);
                 $("#n_hidden").val(2);
                 $("#n_output").val(2);
 
-                $("#fset").attr("disabled", false);
-                $("#fset").show();
+                $("#pal_fset").attr("disabled", false);
+                $("#pal_fset").show();
             }else if(currData == 'checker'){
-                $("#algo").val('ffn')
+                $("#algo").val('ffn_synaptic')
 
                 $("#n_input").val(2);
                 $("#n_hidden").val(2);
                 $("#n_output").val(2);
 
-                $("#fset").attr("disabled", false);
-                $("#fset").show();
+                $("#pal_fset").attr("disabled", false);
+                $("#pal_fset").hide();
             }
         }
     )
 
     $("#kepler").click(
         () => {
+            trainSet = data_setter("train");
+            debug.trainSet = trainSet
             n_hidden_val = String($("#n_hidden").val())
             n_hidden_array = n_hidden_val.split(',').map((x) => parseInt(x))
 
@@ -458,7 +480,7 @@ window.onload = function(){
                 rate: $("#lr").val(),
                 batch_num: 1,
                 iterations: $("#iter").val(),
-                trainSet: data_setter(0),
+                trainSet: trainSet,
                 input_size: $("#n_input").val(),
                 hidden_size: n_hidden_array,
                 output_size: $("#n_output").val(),
@@ -467,40 +489,25 @@ window.onload = function(){
         }
     );
 
-
     $("#ptolemee").click(
         () => {
             if(model == null){
                 console.log('train first !!!')
             }else{
-                draw_palindrome_batches({
+                testSet = data_setter('test')
+                debug.testSet = testSet
+                test_batch({
                     canvas: canvas,
                     context: context,
                     curr: 0,
                     max: 1,
                     ms: 1000,
                     model: model,
-                    flatten_input: flatten_setter(),
-                    seq_len: $("#seq_len").val(),
-                    vocab_size: $("#vocab_size").val()
+                    testSet: testSet,
+                    model_type: $("#algo").val()
                 })
             }
         }
     );
-
-    $("#takum").click(() => ripped_test());
-
-    /*
-    to_draw_it.forEach(
-        ([seq, is_pal]) => draw_sequence(
-            seq, context, sub_height, 0, set_color(is_pal)
-        )
-    )
-    */
-
-    /*
-    draw_sequence(palindrome, context, height_zoom, 0, "#11AE11")
-    draw_sequence(non_palindrome, context, height_zoom, 0)
-    */
 
 }
