@@ -1,0 +1,14 @@
+{
+  "libs": [
+   ],
+  "loadEagerly": [
+      "./utils.js",
+      "./bower_components/brain.js"
+    ],
+  "plugins": {
+      "requirejs": {
+            "baseURL": "./",
+            "paths": {}
+          }
+    }
+}

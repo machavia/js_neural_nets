@@ -31,7 +31,7 @@
             </fieldset>
             <fieldset id="pal_fset">
                 half_len: <input
-                    id='seq_len' type='text' value=1 name="seq_len"
+                    id='seq_len' type='text' value=5 name="seq_len"
                     style="width: 50px"
                 \>
                 vocab_size: <input
@@ -48,11 +48,11 @@
           <div>
 
             algo: <select id='algo'>
-              <option value="lstm_synaptic">lstm_synaptic</option>
-              <option value="lstm_brain">lstm_brain</option>
-              <option value="perceptron_synaptic">perceptron_synaptic</option>
-              <option value="ffn_synaptic">ffn_synaptic</option>
               <option value="ffn_brain">ffn_brain</option>
+              <option value="ffn_synaptic">ffn_synaptic</option>
+              <option value="lstm_brain">lstm_brain</option>
+              <option value="lstm_synaptic">lstm_synaptic</option>
+              <option value="perceptron_synaptic">perceptron_synaptic</option>
             </select> 
 
             <fieldset>
@@ -62,17 +62,17 @@
                 \>
 
                 iter: <input
-                    id='iter' type='text' value=10
+                    id='iter' type='text' value=100
                     style="width: 50px"
                 >
 
                 n_input: <input
-                    id='n_input' type='text' value=1
+                    id='n_input' type='text' value=10
                     style="width: 50px"
                 >
 
                 n_hidden: <input
-                    id='n_hidden' type='text' value=2
+                    id='n_hidden' type='text' value=32
                     style="width: 50px"
                 >
 
@@ -112,7 +112,8 @@
 <script src="./bower_components/brain.js/browser.js"></script>
 <script src="jquery-3.2.1.min.js"></script>
 <script src="./synaptic.js"></script>
-<script src="neural_poc.js"></script>
+<script src="./utils.js"></script>
+<script src="./neural_poc.js"></script>
 
 </body>
 </html>
