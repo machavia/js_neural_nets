@@ -1,17 +1,3 @@
-/*
-const {Array1D, Array2D, Scalar, NDArray} =
-    require('./node_modules/deeplearn/dist/math/ndarray');
-
-const {MathBackendWebGL} = 
-    require("./node_modules/deeplearn/dist/math/backends/backend_webgl");
-
-const {MathBackendCPU} = 
-    require("./node_modules/deeplearn/dist/math/backends/backend_cpu");
-
-const {NDArrayMath} = 
-    require("./node_modules/deeplearn/dist/math/math");
-*/
-
 const {
     ENV,
     Array1D,
@@ -65,65 +51,66 @@ class LSTM {
         this.x = graph.placeholder('x', [batch_size, input_size]);
         this.c_tm1 = graph.placeholder('c_tm1', [batch_size, hidden_size]);
         this.h_tm1 = graph.placeholder('h_tm1', [batch_size, hidden_size]);
-
-        this.Wxi  = graph.variable(
-            'Wxi',
-            Array2D.randNormal([input_size, hidden_size])
-        );
-        this.Whi  = graph.variable(
-            'Whi',
-            Array2D.randNormal([hidden_size, hidden_size])
-        );
-        this.Wci  = graph.variable(
-            'Wci',
-            Array2D.randNormal([hidden_size, hidden_size])
-        );
-        this.bi = graph.variable(
-            'bi',
-            Array2D.randNormal([1, hidden_size])
-        );
         this.biasReplicator = graph.constant(NDArray.ones([batch_size, 1]));
+        this.cellEyeMaker = graph.constant(NDArray.ones([batch_size, 1]));
+
+        let inputs = new Map([
+            ['x', ['x', input_size]],
+            ['h_tm1', ['h', hidden_size]],
+            ['c_tm1', ['c', hidden_size]]
+        ])
+        this.defineGate(graph, 'i', inputs, nonlin);
+        this.defineGate(graph, 'f', inputs, nonlin);
+
+        // now we should multiply ft and ct after setting them to diagonals...
+
+        // WARNING: placeholder are not included in the graph apparently so
+        // evaluating them will throw an error !!!
 
         this.x_check = graph.reshape(this.x, [batch_size, input_size]);
         this.m_check = graph.matmul(this.x, this.Wxi);
         this.h_check = graph.matmul(this.h_tm1, this.Whi);
         this.biasMultCheck = graph.matmul(this.biasReplicator, this.bi);
 
-        let toSum = [
-            graph.matmul(this.x, this.Wxi),
-            graph.matmul(this.h_tm1, this.Whi),
-            graph.matmul(this.h_tm1, this.Whi),
-            graph.matmul(this.c_tm1, this.Wci),
-            graph.matmul(this.biasReplicator, this.bi)
-        ]
-
-        this.add = graphSum({'toSum': toSum, 'graph': graph});
-
-        if(nonlin === 'tanh'){
-            this.i = graph.tanh(this.add);
-        }
-
-        // WARNING: placeholder are not included in the graph apparently so
-        // evaluating them will throw an error !!!
-
-        /* TEST */
-        this.xt = graph.placeholder('xt', [4, 2]);
-        this.multiplier = graph.variable(
-            'multiplier', Array2D.randNormal([2, 4])
-        );
-        this.z = graph.matmul(this.xt, this.multiplier);
+        if(nonlin === 'tanh'){}
     }
 
+    defineGate(graph, gateName, inputs, nonlin){
+        // inputs: dict => keys = input name, values last dim
 
-    forward(session, x, c, h){
+        let toSum = [];
+        for(let [inputName, [inputIndex, lastDim]] of inputs){
+            if(! inputs.has(inputName)){
+                throw('no input ' + inputName + ' in inputs');
+            }
+            if(! (inputName in this)){
+                throw(
+                    'no input ' + inputName + ' in LSTM: ' + Object.keys(this)
+                );
+            }
+            let indexName = inputIndex + gateName;
+            let matName = 'W' + indexName;
+            this[matName] = graph.variable(
+                matName, Array2D.randNormal([lastDim, this.hidden_size])
+            );
+            let linAlg = graph.matmul(this[inputName], this[matName])
+            toSum.push(linAlg)
+        }
+        
+        this['b' + gateName] = graph.variable(
+            'b' + gateName,
+            Array2D.randNormal([1, this.hidden_size])
+        );
 
-        /* TEST */
-        let shuffledInputProviderBuilderA =
-            new InCPUMemoryShuffledInputProviderBuilder([x]);
-        let [xProviderA] = shuffledInputProviderBuilderA.getInputProviders();
-        // Maps tensors to InputProviders.
-        let xFeeder = {tensor: this.xt, data: xProviderA};
-        let w = session.eval(this.z, [xFeeder]).dataSync();
+        toSum.push(graph.matmul(this.biasReplicator, this['b' + gateName]));
+
+        this['add' + gateName] = graphSum({'toSum': toSum, 'graph': graph});
+
+        this[gateName] = graph.log(this['add' + gateName]);
+
+    }
+
+    forward(session, x, c, h, printCheck=false){
 
         // Shuffles inputs and labels and keeps them mutually in sync.
         const shuffledInputProviderBuilder =
@@ -139,34 +126,24 @@ class LSTM {
 
         const feedEntries = [xFeed, hFeed, cFeed];
 
-        let val_x = session.eval(this.x_check, [xFeed]).dataSync();
-        console.log("=====>", val_x);
+        if(printCheck){
+            let val_x =
+                session.eval(this.x_check, [xFeed]).dataSync();
+            let val_m_check =
+                session.eval(this.m_check, [xFeed]).dataSync();
+            let val_h_check =
+                session.eval(this.h_check, [hFeed]).dataSync();
+            let val_add_check =
+                session.eval(this.addi, [xFeed, hFeed, cFeed]).dataSync();
+            let biasMultCheck =
+                session.eval(this.biasMultCheck, []).dataSync();
+            console.log("add", val_add_check);
+            console.log('bMM', biasMultCheck);
+        }
 
-        let val_m_check = session.eval(
-            this.m_check, [xFeed]
-        ).dataSync();
-
-        let val_h_check = session.eval(
-            this.h_check, [hFeed]
-        ).dataSync();
-
-        let val_add_check = session.eval(
-            this.add, [xFeed, hFeed, cFeed]
-        ).dataSync();
-
-        let biasMultCheck = session.eval(
-            this.biasMultCheck, []
-        ).dataSync();
-
-        console.log(val_add_check);
-        console.log('bMM', biasMultCheck);
-        console.log('bMM', biasMultCheck.shape);
-        console.log('bMM', this.biasMultCheck.shape);
-
-        /*
-        val_i = session.eval(this.i, feedEntries);
-        return(val_i);
-        */
+        let val_i = session.eval(this.i, feedEntries);
+        let val_f = session.eval(this.f, feedEntries);
+        return(val_i, val_f);
     }
 }
 
@@ -208,6 +185,5 @@ class LSTM {
     const lstm = new LSTM(graph);
     const session = new Session(graph, math);
 
-
-    lstm.forward(session, x, h, c);
+    lstm.forward(session, x, h, c, true);
 }
