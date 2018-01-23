@@ -3,7 +3,8 @@
    ],
   "loadEagerly": [
       "./utils.js",
-      "./bower_components/brain.js"
+      "./bower_components/brain.js",
+      "./node_modules/deeplearn/dist/deeplearn.js"
     ],
   "plugins": {
       "requirejs": {

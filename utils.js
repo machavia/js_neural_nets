@@ -72,7 +72,7 @@ function getSequence(){
                 seq.push([1000])
             }
         }
-    } 
+    }
     return(seq)
 }
 
@@ -288,7 +288,7 @@ function learnModel({
             model = getFFNSynaptic({
                 "input_size": input_size,
                 "hidden_size": hidden_size,
-                "output_size": output_size 
+                "output_size": output_size
             });
             break
         case 'ffn_brain':
@@ -411,7 +411,6 @@ function brainTrainInit(data, _options){
           sizes.push(size);
         });
       }
-        
 
       sizes.unshift(inputSize);
       sizes.push(outputSize);
@@ -459,7 +458,6 @@ function brainIteration({
 
 }
 
-
 var debug = {trainSet: null, testSet: null, model: null}
 
 // END of export boiler plate
@@ -497,5 +495,3 @@ https://www.npmjs.com/package/tensorflow2
 https://bower.io/
 https://github.com/cazala/synaptic/blob/master/dist/synaptic.min.js
 */
-
-

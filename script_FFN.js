@@ -74,3 +74,6 @@ model.train(
       learningRate: 0.2    // learning rate
     }
 );
+
+
+// model.model

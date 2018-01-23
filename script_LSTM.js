@@ -10,12 +10,19 @@ brain = require("./bower_components/brain.js");
 
 const cout = console.log;
 
-let ds = getPalindromeDataset({
-    datasetSize: 1000,
-    dim: 1,
-    flatten: true,
+let ds;
+
+ds = getPalindromeDataset({
+    datasetSize: 100,
+    dim: 4,
+    flatten: false,
     seq_len: 5
 });
+
+brain.recurrent.RNN.defaults.setupData(ds);
+
+brain.recurrent.RNN.defaults.setupData(ds)[0].length;
+// 13
 
 let trainOptions = {
     errorThresh: 0.005,  // error threshold to reach
@@ -28,36 +35,9 @@ let trainOptions = {
 let prev_vars;
 let count;
 let err;
+let model;
 
-let model = getLstmBrain({hiddenSize: [6]});
-
-model = getFFNBrain({hiddenSize: [16]});
-model.brainTrainInit = brainTrainInit;
-model.brainIteration = brainIteration;
-
-cout(
-"===========================================================================",
-"\nMinibatch training",
-"\n==========================================================================="
-);
-
-count = 0;
-prev_vars = null;
-while(count < 100){
-    brainTrainOptions = model.brainTrainInit(ds, trainOptions);
-    brainTrainOptions.i = count;
-    if(prev_vars !== null){
-        model.biases = prev_vars.biases;
-        model.weights = prev_vars.weights;
-        model.momentum = prev_vars.momentum;
-    }
-    err = model.brainIteration(brainTrainOptions).error;
-    prev_vars = [];
-    prev_vars.biases = model.biases;
-    prev_vars.weights = model.weights;
-    prev_vars.momentum = model.momentum;
-    count++;
-}
+model = getLstmBrain({hiddenSize: [32]});
 
 cout(
 "===========================================================================",
@@ -71,6 +51,20 @@ model.train(
       iterations: 100,   // maximum training iterations
       log: true,           // console.log() progress periodically
       logPeriod: 10,       // number of iterations between logging
-      learningRate: 0.2    // learning rate
+      learningRate: 0.001    // learning rate
     }
 );
+
+model.model.equations
+
+let predictions;
+
+predictions = new Array();
+for(let i = 0; i < ds.length; i++){
+    predictions.push(model.run(ds[i].input));
+}
+
+/*
+model.toJSON()
+model.fromJSON()
+*/
