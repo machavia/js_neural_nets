@@ -138,7 +138,7 @@ function getFFNBrain({hidden_size=[2]}){
 
 function getLstmBrain({hidden_size=[2]}){
 
-    var net = new brain.recurrent.LSTM({
+    var net = new brain.recurrent.LSTMCell({
         hidden_layers: hidden_size
     });
     return(net)
@@ -275,7 +275,7 @@ function learnModel({
 
     switch(model_type){
         case "lstm_synaptic":
-            model = new Architect.LSTM(
+            model = new Architect.LSTMCell(
                 input_size, hidden_size, output_size
             );
             break;
