@@ -36,7 +36,7 @@ function getNonPalindrome(vocab_size=10, seq_len=0, noise=0, dim=1){
     let second_half = getRandSequence(seq_len, vocab_size, noise, dim);
     let same = true;
     for(let i = 0; i < first_half.length; i++){
-        for(let j = 0; j <= first_half[i].length; j++){
+        for(let j = 0; j < first_half[i].length; j++){
             if(
                 Math.round(second_half[second_half.length - (i + 1)][j]) !=
                 Math.round(first_half[i][j])
@@ -207,7 +207,7 @@ function reassort({dim=null, seq=null}){
 
 function getPalindromeDataset({
     datasetSize=1000, flatten=true, seq_len=1, vocab_size=2,
-    noise=0, dim=1
+    noise=0, dim=1, outputLength=1
 }){
     let trainSet = []
     for(let i = 0; i < datasetSize / 2; i++){
@@ -231,8 +231,10 @@ function getPalindromeDataset({
             trainSet.push({input: pal, output: [0,1]});
             trainSet.push({input: non_pal, output: [1,0]});
         */
-        trainSet.push({input: pal, output: [1]});
-        trainSet.push({input: non_pal, output: [0]});
+        let target = outputLength === 1 ? [1] : [0, 1];
+        trainSet.push({input: pal, output: target});
+        target = outputLength === 1 ? [0] : [1, 0];
+        trainSet.push({input: non_pal, output: target});
     }
     return(trainSet);
 }
@@ -349,7 +351,7 @@ function testBatch({
 
     for([idx, {input: seq, output: output}] of to_draw_it){
         //seq = input;
-        is_pal = ! Boolean(output[0]);
+        is_pal = Boolean(output[0]);
         drawSequence(
             seq, context, sub_height, sub_height * idx, setColor(is_pal)
         );
