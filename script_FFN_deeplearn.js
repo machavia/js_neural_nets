@@ -1,6 +1,8 @@
 const {
     ENV,
+    AdagradOptimizer,
     AdamOptimizer,
+    AdamaxOptimizer,
     Array1D,
     Array2D,
     Array3D,
@@ -79,14 +81,14 @@ class FFN1D {
 
         this.x = graph.placeholder('x', [input_size]);
         this.Wh = graph.variable(
-            'Wh', Array2D.randNormal([input_size + 1, hidden_size])
+            'Wh', Array2D.randNormal([hidden_size, input_size + 1])
         );
         this.ones = graph.constant(NDArray.ones([1]));
 
         // define h
         let linAlgH = graph.matmul(
-            graph.concat2d(this.x, this.ones, 0),
-            this.Wh
+            this.Wh,
+            graph.concat1d(this.x, this.ones)
         );
 
         this.h = graph.tanh(linAlgH);
@@ -94,13 +96,13 @@ class FFN1D {
         console.log("nPredictions:", nPredictions)
 
         this.Wp = graph.variable(
-            'Wp', Array2D.randNormal([input_size + 1, nPredictions])
+            'Wp', Array2D.randNormal([nPredictions, input_size + 1])
         );
 
         // define p
         this.logits = graph.matmul(
-            graph.concat2d(this.x, this.ones, 0),
-            this.Wp
+            this.Wp,
+            graph.concat1d(this.x, this.ones)
         );
 
         console.log("logits shape:", this.logits.shape)
@@ -416,15 +418,16 @@ async function firstLearn(){
 
 function getDataSet({
     datasetSize, dim=1, flatten=true, seq_len=1, outputSize=2,
-    hiddenSize=8
+    hiddenSize=8, noise=0
 }){
     
     let ds = getPalindromeDataset({
-        datasetSize: 8,
-        dim: 1,
+        datasetSize: datasetSize,
+        dim: dim,
         flatten: true,
-        seq_len: 1,
-        outputLength: outputSize
+        seq_len: seq_len,
+        outputLength: outputSize,
+        noise: noise
     });
 
     let [x, h, c, labels] = [[], [], [], []];
@@ -459,8 +462,7 @@ function getDataSet({
     return([xProvider, hProvider, cProvider, lProvider]);
 }
 
-// math.basicLSTMCell
-async function demo(){
+async function lstmDemo(){
 
     // await firstLearn();
 
@@ -503,7 +505,6 @@ async function demo(){
 
     labelTensor = graph.placeholder('label', [outputSize]);
     
-    /*
     const lstmCell = new LSTMCell({
         graph: graph, batch_size: batchSize, nPredictions: outputSize,
         hidden_size: hiddenSize, input_size: ds[0].input.length
@@ -526,7 +527,6 @@ async function demo(){
     tCheck = graph.reshape(labelTensor, labelTensor.shape);
 
     // run(session, feedEntries, costTensor, optimizer, batchSize, 100);
-    /*
     let NUM_BATCHES = 10;
     for (let i = 0; i < NUM_BATCHES; i++) {
         // Train takes a cost tensor to minimize. Trains one batch. Returns the
@@ -543,15 +543,229 @@ async function demo(){
             "t ==>",  l1.dataSync().slice(0, 2)
         );
     }
+
+}
+
+function testExample({
+    withTanh=false, withSigmoid=false, withCustomSigmoid=false,
+    withSuperCustomSigmoid=false
+}){
+
+    const g = new Graph();
+    const math = ENV.math;
+
+    let learningRate = 0.1; // .00001
+    let momentum = 0.9;
+    let batchSize = 64; // 3
+    let graphCostFunc = (prey, y, l) => {return(g.meanSquaredCost(y, l))};
+
+    if (withTanh){
+        transformFunc = Math.tanh;
+        graphTransformFunc = (x) => {return(g.tanh(x))};
+    }else if (withSigmoid || withCustomSigmoid){
+        transformFunc = (x) => {return((x > 1.5) + 0)};
+        graphTransformFunc = (x) => {return(g.sigmoid(x))};
+        learningRate = 0.001; // .00001
+        momentum = 0.8;
+        batchSize = 64; // 3
+        if(withCustomSigmoid){
+            // from demo xor
+            const EPSILON = 1e-7;
+
+            const graphCostFunc = (prey, y, l) => {
+                // output = y;
+                output = prey;
+                y = l;
+                graph.reduceSum(
+                    graph.add(
+                    graph.multiply(
+                        graph.constant([-1]),
+                        graph.multiply(
+                            y, graph.log(
+                                graph.add(output, graph.constant([EPSILON]))
+                            )
+                        )
+                    ),
+                    graph.multiply(
+                        graph.constant([-1]),
+                        graph.multiply(
+                            graph.subtract(graph.constant([1]), y),
+                            graph.log(graph.add(
+                                graph.subtract(graph.constant([1]), output),
+                                graph.constant([EPSILON])))))));
+            }
+        }else if(withSuperCustomSigmoid){
+            const EPSILON = 1e-7;
+
+            const graphCostFunc = (prey, y, l) => {
+                // output = y;
+                output = prey;
+                y = l;
+                graph.reduceSum(
+                    graph.multiply(
+                        graph.constant([-1]),
+                        graph.add(
+                            graph.multiply(
+                                y,
+                                graph.log(
+                                    graph.add(
+                                        output,
+                                        graph.constant([EPSILON])
+                                    )
+                                )
+                            ),
+                            graph.multiply(
+                                graph.subtract(graph.constant([1]), y),
+                                graph.log(
+                                    graph.add(
+                                        graph.subtract(
+                                            graph.constant([1]),
+                                            output
+                                        ),
+                                        graph.constant([EPSILON])
+                                    )
+                                )
+                            )
+                        )
+                    )
+                );
+            }
+        }else{
+            graphCostFunc = (prey, y, l) => {
+                return(g.softmaxCrossEntropyCost(prey, l))
+            };
+        }
+    }else{
+        transformFunc = (x) => {return(x)};
+        graphTransformFunc = (x) => {return(idt(g, x))};
+        learningRate = 0.1; // .00001
+        momentum = 0.8;
+        batchSize = 64; // 3
+    }
+
+    // Placeholders are input containers. This is the container for where we will
+    // feed an input NDArray when we execute the graph.
+    const inputShape = [3];
+    const inputTensor = g.placeholder('input', inputShape);
+
+    const labelShape = [1];
+    const labelTensor = g.placeholder('label', labelShape);
+
+    // Variables are containers that hold a value that can be updated from
+    // training.
+    // Here we initialize the multiplier variable randomly.
+    const multiplier = g.variable('multiplier', Array2D.randNormal([1, 3]));
+
+    // Top level graph methods take Tensors and return Tensors.
+    const preOut = g.matmul(multiplier, inputTensor)
+    const outputTensor = graphTransformFunc(preOut)
+    ;
+    const costTensor = graphCostFunc(preOut, outputTensor, labelTensor);
+
+    // Tensors, like NDArrays, have a shape attribute.
+    console.log(outputTensor.shape);
+
+    const session = new Session(g, math);
+    // const optimizer = new SGDOptimizer(learningRate);
+    // const optimizer = new MomentumOptimizer(learningRate, momentum);
+    const optimizer = new MomentumOptimizer(learningRate, momentum);
+
+    const inputs = [];
+    const labels = [];
+    for(let i = 0; i <= 1000; i++){
+        // const mult = Math.random() * 100;
+        const a = Math.random();
+        const b = Math.random();
+        const c = Math.random();
+        const out = transformFunc(a + b + c);
+        // console.log(mult, a, b, c , out)
+        inputs.push(Array1D.new([a, b, c]));
+        labels.push(Array1D.new([out]));
+    
+        /*
+        if ( !(graphTransformFunc === null)){
+            console.log(
+                out,
+                session.eval(g.tanh(g.constant(a + b + c))).dataSync();
+            )
+        }
+        */
+    }
+
+
+    /*
+    const inputs = [
+      Array1D.new([1.0, 2.0, 3.0]),
+      Array1D.new([10.0, 20.0, 30.0]),
+      Array1D.new([100.0, 200.0, 300.0]),
+      Array1D.new([1.0, 2.0, 3.0]),
+      Array1D.new([10.0, 20.0, 30.0]),
+      Array1D.new([100.0, 200.0, 300.0])
+    ];
+
+    const labels = [
+      Array1D.new([transformFunc(4.0)]),
+      Array1D.new([transformFunc(40.0)]),
+      Array1D.new([transformFunc(400.0)]),
+      Array1D.new([transformFunc(4.0)]),
+      Array1D.new([transformFunc(40.0)]),
+      Array1D.new([transformFunc(400.0)])
+    ];
     */
 
-    hiddenSize = 16;
-    learningRate = 0.1;
+    // Shuffles inputs and labels and keeps them mutually in sync.
+    const shuffledInputProviderBuilder =
+      new InCPUMemoryShuffledInputProviderBuilder([inputs, labels]);
+    const [inputProvider, labelProvider] =
+      shuffledInputProviderBuilder.getInputProviders();
+
+    // Maps tensors to InputProviders.
+    const feedEntries = [
+      {tensor: inputTensor, data: inputProvider},
+      {tensor: labelTensor, data: labelProvider}
+    ];
+
+    const NUM_BATCHES = 100;
+    for (let i = 0; i < NUM_BATCHES; i++) {
+      // Train takes a cost tensor to minimize. Trains one batch. Returns the
+      // average cost as a Scalar.
+      const cost = session.train(
+          costTensor, feedEntries, batchSize, optimizer, CostReduction.MEAN);
+
+      console.log('last average cost (' + i + '): ' + cost.dataSync());
+    }
+
+}
+
+// math.basicLSTMCell
+async function demoFFN1D(){
+
+    math = ENV.math;
+    const graph = new Graph();
+    const session = new Session(graph, math);
+
+    // await firstLearn();
+
+    let batchSize = 64;
+    let hiddenSize = 32;
+    let outputSize = 2;
+    let learningRate = 0.01;
     let momentum = 0.7;
+    let seqLen = 32;
+
+    let [xProvider, hProvider, cProvider, lProvider] = getDataSet({
+        datasetSize: 10 * batchSize,
+        dim: 1,
+        seq_len: seqLen / 2,
+        outputSize: outputSize,
+        noise: 0.4
+    })
+
+    labelTensor = graph.placeholder('label', [outputSize]);
 
     const ffn = new FFN1D({
         graph: graph, nPredictions: outputSize,
-        hidden_size: hiddenSize, input_size: ds[0].input.length
+        hidden_size: hiddenSize, input_size: seqLen
     });
 
     // Maps tensors to InputProviders.
@@ -568,118 +782,60 @@ async function demo(){
     x_check = graph.reshape(ffn.x, ffn.x.shape);
     l_check = graph.reshape(labelTensor, labelTensor.shape);
 
-    optimizer = new RMSPropOptimizer(learningRate, momentum);
+    // optimizer = new RMSPropOptimizer(learningRate, momentum);
+    optimizer = new SGDOptimizer(learningRate);
 
     NUM_BATCHES = 100;
     for (let i = 0; i < NUM_BATCHES; i++) {
         // Train takes a cost tensor to minimize. Trains one batch. Returns the
         // average cost as a Scalar.
-        const [l1, p1] =
-            session.evalAll([ffn.logits, ffn.p], feedEntries);
+        const [l1, p1, x1, t1] =
+            session.evalAll(
+                [ffn.logits, ffn.p, x_check, l_check],
+                feedEntries
+            );
+        /*
         console.log("l ==>", l1.dataSync());
         console.log("p ==>", p1.dataSync());
+        console.log("x ==>", x1.dataSync());
+        console.log("t ==>", t1.dataSync());
+        */
+        console.log("p ==>", p1.dataSync());
+        console.log("t ==>", t1.dataSync());
 
         const cost = session.train(
             costTensor, feedEntries, batchSize, optimizer, CostReduction.MEAN
         );
 
-        /*
         costVal = await cost.val();
         console.log('last average cost (' + i + '): ' + costVal);
-        */
     }
 
 }
 
-function testExample(){
+function idt(graph, x){
+    return(graph.reshape(x, x.shape));
+}
 
+function slightlyModifiedTestExample(printInfo=false){
     const g = new Graph();
-
-    // Placeholders are input containers. This is the container for where we will
-    // feed an input NDArray when we execute the graph.
-    const inputShape = [3];
-    const inputTensor = g.placeholder('input', inputShape);
-
-    const labelShape = [1];
-    const labelTensor = g.placeholder('label', labelShape);
-
-    // Variables are containers that hold a value that can be updated from
-    // training.
-    // Here we initialize the multiplier variable randomly.
-    const multiplier = g.variable('multiplier', Array2D.randNormal([1, 3]));
-
-    // Top level graph methods take Tensors and return Tensors.
-    const outputTensor = g.matmul(multiplier, inputTensor);
-    const costTensor = g.meanSquaredCost(outputTensor, labelTensor);
-
-    // Tensors, like NDArrays, have a shape attribute.
-    console.log(outputTensor.shape);
-
-    const learningRate = .00001;
-    const batchSize = 3;
     const math = ENV.math;
-
     const session = new Session(g, math);
-    const optimizer = new SGDOptimizer(learningRate);
 
-    const inputs = [
-      Array1D.new([1.0, 2.0, 3.0]),
-      Array1D.new([10.0, 20.0, 30.0]),
-      Array1D.new([100.0, 200.0, 300.0]),
-      Array1D.new([1.0, 2.0, 3.0]),
-      Array1D.new([10.0, 20.0, 30.0]),
-      Array1D.new([100.0, 200.0, 300.0])
-    ];
-
-    const labels = [
-      Array1D.new([4.0]),
-      Array1D.new([40.0]),
-      Array1D.new([400.0]),
-      Array1D.new([4.0]),
-      Array1D.new([40.0]),
-      Array1D.new([400.0])
-    ];
-
-    // Shuffles inputs and labels and keeps them mutually in sync.
-    const shuffledInputProviderBuilder =
-      new InCPUMemoryShuffledInputProviderBuilder([inputs, labels]);
-    const [inputProvider, labelProvider] =
-      shuffledInputProviderBuilder.getInputProviders();
-
-    // Maps tensors to InputProviders.
-    const feedEntries = [
-      {tensor: inputTensor, data: inputProvider},
-      {tensor: labelTensor, data: labelProvider}
-    ];
-
-    const NUM_BATCHES = 10;
-    for (let i = 0; i < NUM_BATCHES; i++) {
-      // Train takes a cost tensor to minimize. Trains one batch. Returns the
-      // average cost as a Scalar.
-      const cost = session.train(
-          costTensor, feedEntries, batchSize, optimizer, CostReduction.MEAN);
-
-      console.log('last average cost (' + i + '): ' + cost.dataSync());
-    }
-
-}
-
-
-function slightlyModifiedTestExample(){
-
-    const g = new Graph();
-
-    seqLen = 4;
-    const labelShape = 2;
-    let batchSize = 8;
-    let hiddenSize = 16;
-    let learningRate = 0.005;
+    seqLen = 2;
+    const labelShape = 1;
+    let batchSize = 64;
+    let hiddenSize = 2;
+    let learningRate = 0.1;
+    let momentum = 0.8;
+    let datasetSize = 640;
+    let noise = 0.49;
 
     // Placeholders are input containers. This is the container for where we will
     // feed an input NDArray when we execute the graph.
     const inputShape = [seqLen];
-    const inputTensor = g.placeholder('input', inputShape);
 
+    const inputTensor = g.placeholder('input', inputShape);
     const labelTensor = g.placeholder('label', [labelShape]);
 
     // Variables are containers that hold a value that can be updated from
@@ -687,49 +843,61 @@ function slightlyModifiedTestExample(){
     // Here we initialize the multiplier variable randomly.
     const multiplier = g.variable(
         'multiplier',
-        Array2D.randNormal([labelShape, seqLen])
+        Array2D.randNormal([labelShape, seqLen + 1])
     );
 
     // Top level graph methods take Tensors and return Tensors.
-    const outputTensor = g.tanh(g.matmul(multiplier, inputTensor));
+    const eInput = g.concat1d(inputTensor, g.constant(Array1D.ones([1])));
+    const lin = g.matmul(multiplier, eInput);
+    const outputTensor = g.sigmoid(lin);
     const costTensor = g.meanSquaredCost(outputTensor, labelTensor);
+    // const costTensor = g.softmaxCrossEntropyCost(lin, labelTensor);
 
-    // Tensors, like NDArrays, have a shape attribute.
-    console.log(outputTensor.shape);
-
-    const math = ENV.math;
-
-    const session = new Session(g, math);
-    const optimizer = new SGDOptimizer(learningRate);
+    const optimizer = new MomentumOptimizer(learningRate, momentum);
+    // const optimizer = new AdamOptimizer(learningRate, momentum);
+    // const optimizer = new AdagradOptimizer(learningRate);
 
     let [inputProvider, , , labelProvider] = getDataSet({
-        datasetSize: batchSize,
+        datasetSize: datasetSize,
         dim: 1,
         seq_len: seqLen / 2,
-        outputSize: labelShape
-    })
+        outputSize: labelShape,
+        noise: noise 
+    });
 
     // Maps tensors to InputProviders.
     const feedEntries = [
-      {tensor: inputTensor, data: inputProvider},
-      {tensor: labelTensor, data: labelProvider}
+        {tensor: inputTensor, data: inputProvider},
+        {tensor: labelTensor, data: labelProvider}
     ];
 
-    const NUM_BATCHES = 10;
+    const NUM_BATCHES = 100;
     for (let i = 0; i < NUM_BATCHES; i++) {
-      // Train takes a cost tensor to minimize. Trains one batch. Returns the
-      // average cost as a Scalar.
-      const cost = session.train(
-          costTensor, feedEntries, batchSize, optimizer, CostReduction.MEAN);
+        // Train takes a cost tensor to minimize. Trains one batch. Returns the
+        // average cost as a Scalar.
 
-      console.log('last average cost (' + i + '): ' + cost.dataSync());
+        if(printInfo){
+            const [x, l, p] =
+                session.evalAll(
+                    [idt(g, inputTensor), idt(g, labelTensor), outputTensor], 
+                    feedEntries
+                );
+            console.log('x', x.dataSync(), 'l', l.dataSync(), 'p', p.dataSync());
+        }
+        const cost = session.train(
+          costTensor, feedEntries, batchSize, optimizer, CostReduction.MEAN
+        );
+
+        console.log('last average cost (' + i + '): ' + cost.dataSync());
     }
-
 }
 
+testExample({});
+testExample({withTanh: true});
+testExample({withSigmoid: true});
+testExample({withCustomSigmoid: true});
+testExample({withSuperCustomSigmoid: true});
+// slightlyModifiedTestExample(printInfo=true);
 
 
-slightlyModifiedTestExample();
-
-
-// demo();
+// demoFFN1D();
