@@ -70,7 +70,7 @@ class RNN() {
 }
 */
 
-class FFN1D {
+class FFN1Dold {
     constructor({
         graph, input_size=2, hidden_size=3, nonlin='tanh',
         nPredictions=1
@@ -115,6 +115,53 @@ class FFN1D {
     }
 
 }
+
+class FFN1D {
+    constructor({
+        graph, input_size=2, hidden_size=3, nPredictions=1
+    }){
+        this.input_size = input_size;
+        this.hidden_size = hidden_size;
+
+        this.x = graph.placeholder('x', [input_size]);
+        this.y = graph.placeholder('x', [nPredictions]);
+
+        const EPSILON = 1e-7;
+        // Variables are containers that hold a value that can be updated from
+        // trainingraph.
+        // Here we initialize the multiplier variable randomly.
+        const hiddenLayer = graph.layers.dense(
+            'hiddenLayer', this.x, hidden_size, (x) => graph.relu(x), true
+        );
+        this.output = graph.layers.dense(
+            'outputLayer', hiddenLayer, nPredictions, (x) => graph.sigmoid(x),
+            true
+        );
+        this.cost = graph.reduceSum(graph.add(
+            graph.multiply(
+                graph.constant([-1]),
+                graph.multiply(
+                    this.y,
+                    graph.log(
+                        graph.add(this.output, graph.constant([EPSILON]))))),
+            graph.multiply(
+                graph.constant([-1]),
+                graph.multiply(
+                    graph.subtract(graph.constant([1]), this.y),
+                    graph.log(
+                        graph.add(
+                            graph.subtract(graph.constant([1]), this.output),
+                            graph.constant([EPSILON])))))));
+
+        console.log("nPredictions:", nPredictions)
+
+        // WARNING: placeholder are not included in the graph apparently so
+        // evaluating them will throw an error !!!
+
+    }
+
+}
+
 
 
 class FFN {
@@ -163,9 +210,80 @@ class FFN {
     }
 
 }
+ class LSTMCell{
+    constructor({
+        graph, input_size=2, hidden_size=3, nPredictions=1
+    }){
+        this.input_size = input_size;
+        this.hidden_size = hidden_size;
+
+        this.x = graph.placeholder('x', [input_size]);
+        this.y = graph.placeholder('y', [nPredictions]);
+        this.c_tm1 = graph.placeholder('c_tm1', [hidden_size]);
+        this.h_tm1 = graph.placeholder('h_tm1', [hidden_size]);
+
+        let XHC_prev = graph.concat1d(
+            this.x, graph.concat1d(this.h_tm1, this.c_tm1)
+        )
+        let XH = graph.concat1d(this.x, this.h_tm1)
+
+        this.i = graph.layers.dense(
+            'i', XHC_prev, hidden_size,
+            (x) => graph.sigmoid(x), true);
+        this.f = graph.layers.dense(
+            'f', XHC_prev, hidden_size,
+            (x) => graph.sigmoid(x), true);
+
+        this.c = graph.add(
+            graph.multiply(this.f, this.c_tm1),
+            graph.multiply(
+                this.i,
+                graph.layers.dense(
+                    'c_half', XH, hidden_size,
+                    (x) => graph.tanh(x), true)
+            )
+        );
+
+        let XHC = graph.concat1d(
+            this.x, graph.concat1d(this.h_tm1, this.c)
+        )
+
+        this.o = graph.layers.dense(
+            'o', XHC, hidden_size,
+            (x) => graph.sigmoid(x), true);
+
+        // define h
+        this.h = graph.multiply(this.o, graph.tanh(this.c));
+
+        this.output = graph.layers.dense(
+            'classif', this.h, nPredictions,
+            (x) => graph.sigmoid(x), true);
 
 
-class LSTMCell {
+        const EPSILON = 1e-7;
+        this.cost = graph.reduceSum(graph.add(
+            graph.multiply(
+                graph.constant([-1]),
+                graph.multiply(
+                    this.y,
+                    graph.log(
+                        graph.add(this.output, graph.constant([EPSILON]))))),
+            graph.multiply(
+                graph.constant([-1]),
+                graph.multiply(
+                    graph.subtract(graph.constant([1]), this.y),
+                    graph.log(
+                        graph.add(
+                            graph.subtract(graph.constant([1]), this.output),
+                            graph.constant([EPSILON])))))));
+
+        console.log("nPredictions:", nPredictions)
+
+    }
+}
+
+
+class LSTMCellOld {
     constructor({
         graph, input_size=2, hidden_size=3, batch_size=4, nonlin='tanh',
         nPredictions=1
@@ -459,7 +577,7 @@ function getDataSet({
     [xProvider, hProvider, cProvider, lProvider] =
         shuffledInputProviderBuilder.getInputProviders();
 
-    return([xProvider, hProvider, cProvider, lProvider]);
+    return([ds, xProvider, hProvider, cProvider, lProvider]);
 }
 
 async function lstmDemo(){
@@ -471,7 +589,7 @@ async function lstmDemo(){
     let outputSize = 2;
     let learningRate = 0.5;
 
-    let [xProvider, hProvider, cProvider, lProvider] = getDataSet({
+    let [ds, xProvider, hProvider, cProvider, lProvider] = getDataSet({
         datasetSize: batchSize,
         dim: 1,
         seq_len: 2,
@@ -546,98 +664,129 @@ async function lstmDemo(){
 
 }
 
-function testExample({
-    withTanh=false, withSigmoid=false, withCustomSigmoid=false,
-    withSuperCustomSigmoid=false
-}){
-
-    const g = new Graph();
-    const math = ENV.math;
-
-    let learningRate = 0.1; // .00001
-    let momentum = 0.9;
-    let batchSize = 64; // 3
-    let graphCostFunc = (prey, y, l) => {return(g.meanSquaredCost(y, l))};
-
-    if (withTanh){
-        transformFunc = Math.tanh;
-        graphTransformFunc = (x) => {return(g.tanh(x))};
-    }else if (withSigmoid || withCustomSigmoid){
-        transformFunc = (x) => {return((x > 1.5) + 0)};
-        graphTransformFunc = (x) => {return(g.sigmoid(x))};
-        learningRate = 0.001; // .00001
-        momentum = 0.8;
-        batchSize = 64; // 3
-        if(withCustomSigmoid){
-            // from demo xor
-            const EPSILON = 1e-7;
-
-            const graphCostFunc = (prey, y, l) => {
-                // output = y;
-                output = prey;
-                y = l;
-                graph.reduceSum(
-                    graph.add(
+function customSigmoidCost(graph, y, l){
+    const EPSILON = 1e-7;
+    let output = y;
+    y = l;
+    return(
+        graph.reduceSum(
+            graph.multiply(
+                graph.constant([-1]),
+                graph.add(
                     graph.multiply(
-                        graph.constant([-1]),
-                        graph.multiply(
-                            y, graph.log(
-                                graph.add(output, graph.constant([EPSILON]))
+                        y,
+                        graph.log(
+                            graph.add(
+                                output,
+                                graph.constant([EPSILON])
                             )
                         )
                     ),
                     graph.multiply(
-                        graph.constant([-1]),
-                        graph.multiply(
-                            graph.subtract(graph.constant([1]), y),
-                            graph.log(graph.add(
-                                graph.subtract(graph.constant([1]), output),
-                                graph.constant([EPSILON])))))));
-            }
-        }else if(withSuperCustomSigmoid){
-            const EPSILON = 1e-7;
-
-            const graphCostFunc = (prey, y, l) => {
-                // output = y;
-                output = prey;
-                y = l;
-                graph.reduceSum(
-                    graph.multiply(
-                        graph.constant([-1]),
-                        graph.add(
-                            graph.multiply(
-                                y,
-                                graph.log(
-                                    graph.add(
-                                        output,
-                                        graph.constant([EPSILON])
-                                    )
-                                )
-                            ),
-                            graph.multiply(
-                                graph.subtract(graph.constant([1]), y),
-                                graph.log(
-                                    graph.add(
-                                        graph.subtract(
-                                            graph.constant([1]),
-                                            output
-                                        ),
-                                        graph.constant([EPSILON])
-                                    )
-                                )
+                        graph.subtract(graph.constant([1]), y),
+                        graph.log(
+                            graph.add(
+                                graph.subtract(
+                                    graph.constant([1]),
+                                    output
+                                ),
+                                graph.constant([EPSILON])
                             )
                         )
                     )
-                );
+                )
+            )
+        )
+    );
+}
+
+function testExample({
+    withTanh=false, withCustomSigmoid=false, withSuperCustomSigmoid=false
+}){
+
+    const grph = new Graph();
+    const math = ENV.math;
+    const session = new Session(grph, math);
+
+    let learningRate = 0.1; // .00001
+    let momentum = 0.9;
+    let batchSize = 64; // 3
+    let graphCostFunc = (prey, y, l) => {return(grph.meanSquaredCost(y, l))};
+
+    console.log(
+        'withTanh', withTanh, // 'withSigmoid', withSigmoid,
+        'withCustomSigmoid', withCustomSigmoid,
+        'withSuperCustomSigmoid', withSuperCustomSigmoid,
+        "withCustomSigmoid || withSuperCustomSigmoid", withCustomSigmoid || withSuperCustomSigmoid
+    )
+
+    console.log("???????????????????????????????????????????????????????????")
+    if (withTanh){
+        console.log("^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^")
+        transformFunc = Math.tanh;
+        graphTransformFunc = (x) => {return(grph.tanh(x))};
+    } else if (withCustomSigmoid || withSuperCustomSigmoid){
+        console.log(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>")
+        transformFunc = (x) => {return((x > 1.5) + 0)};
+        // graphTransformFunc = (x) => {return(g.sigmoid(x))};
+        graphTransformFunc = (x) => {
+            return(
+                grph.divide(
+                    grph.constant([1]), 
+                    grph.add(
+                        grph.constant([1]), 
+                        grph.exp(grph.multiply(grph.constant([-1]), x))
+                    )
+                )
+            )    
+        };
+        learningRate = 0.1; // .00001
+        momentum = 0.8;
+        batchSize = 64; // 3
+        if(withCustomSigmoid){
+            console.log("----------------------------------------------------")
+            // from demo xor
+            const EPSILON = 1e-7;
+
+            const graphCostFunc = (prey, y, l) => {
+                // copied from xor demo
+                // output = y;
+                output = y;
+                y = l;
+                grph.reduceSum(
+                    grph.add(
+                    grph.multiply(
+                        grph.constant([-1]),
+                        grph.multiply(
+                            y, grph.log(
+                                grph.add(output, grph.constant([EPSILON]))
+                            )
+                        )
+                    ),
+                    grph.multiply(
+                        grph.constant([-1]),
+                        grph.multiply(
+                            grph.subtract(grph.constant([1]), y),
+                            grph.log(grph.add(
+                                grph.subtract(grph.constant([1]), output),
+                                grph.constant([EPSILON])))))));
+            }
+        }else if(withSuperCustomSigmoid){
+            console.log("====================================================")
+            graphCostFunc = (prey, y, l) => {
+                return(customSigmoidCost(grph, y, l))
+                // output = y;
             }
         }else{
+            console.log("::::::::::::::::::::::::::::::::::::::::::::::::::::")
             graphCostFunc = (prey, y, l) => {
-                return(g.softmaxCrossEntropyCost(prey, l))
+                return(grph.softmaxCrossEntropyCost(prey, l))
             };
         }
     }else{
+        console.log("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
         transformFunc = (x) => {return(x)};
-        graphTransformFunc = (x) => {return(idt(g, x))};
+        graphTransformFunc = (x) => {return(idt(grph, x))};
         learningRate = 0.1; // .00001
         momentum = 0.8;
         batchSize = 64; // 3
@@ -646,18 +795,18 @@ function testExample({
     // Placeholders are input containers. This is the container for where we will
     // feed an input NDArray when we execute the graph.
     const inputShape = [3];
-    const inputTensor = g.placeholder('input', inputShape);
+    const inputTensor = grph.placeholder('input', inputShape);
 
     const labelShape = [1];
-    const labelTensor = g.placeholder('label', labelShape);
+    const labelTensor = grph.placeholder('label', labelShape);
 
     // Variables are containers that hold a value that can be updated from
     // training.
     // Here we initialize the multiplier variable randomly.
-    const multiplier = g.variable('multiplier', Array2D.randNormal([1, 3]));
+    const multiplier = grph.variable('multiplier', Array2D.randNormal([1, 3]));
 
     // Top level graph methods take Tensors and return Tensors.
-    const preOut = g.matmul(multiplier, inputTensor)
+    const preOut = grph.matmul(multiplier, inputTensor)
     const outputTensor = graphTransformFunc(preOut)
     ;
     const costTensor = graphCostFunc(preOut, outputTensor, labelTensor);
@@ -665,7 +814,6 @@ function testExample({
     // Tensors, like NDArrays, have a shape attribute.
     console.log(outputTensor.shape);
 
-    const session = new Session(g, math);
     // const optimizer = new SGDOptimizer(learningRate);
     // const optimizer = new MomentumOptimizer(learningRate, momentum);
     const optimizer = new MomentumOptimizer(learningRate, momentum);
@@ -738,7 +886,7 @@ function testExample({
 }
 
 // math.basicLSTMCell
-async function demoFFN1D(){
+async function demoFFN1D(printInfo=false){
 
     math = ENV.math;
     const graph = new Graph();
@@ -747,21 +895,20 @@ async function demoFFN1D(){
     // await firstLearn();
 
     let batchSize = 64;
-    let hiddenSize = 32;
-    let outputSize = 2;
-    let learningRate = 0.01;
-    let momentum = 0.7;
-    let seqLen = 32;
+    let hiddenSize = 8;
+    let outputSize = 1;
+    let learningRate = 0.2;
+    let momentum = 0.9;
+    let seqLen = 2;
+    let noise = 0.4;
 
-    let [xProvider, hProvider, cProvider, lProvider] = getDataSet({
+    let [ds, xProvider, hProvider, cProvider, lProvider] = getDataSet({
         datasetSize: 10 * batchSize,
         dim: 1,
         seq_len: seqLen / 2,
         outputSize: outputSize,
-        noise: 0.4
+        noise: noise
     })
-
-    labelTensor = graph.placeholder('label', [outputSize]);
 
     const ffn = new FFN1D({
         graph: graph, nPredictions: outputSize,
@@ -770,52 +917,131 @@ async function demoFFN1D(){
 
     // Maps tensors to InputProviders.
     xFeed = {tensor: ffn.x, data: xProvider};
-    lFeed = {tensor: labelTensor, data: lProvider};
-
-    feedEntries = [xFeed, lFeed];
-
-    costTensor = graph.softmaxCrossEntropyCost(ffn.logits, labelTensor);
-    // costTensor = graph.meanSquaredCost(ffn.p, labelTensor);
+    lFeed = {tensor: ffn.y, data: lProvider};
 
     feedEntries = [xFeed, lFeed];
 
     x_check = graph.reshape(ffn.x, ffn.x.shape);
-    l_check = graph.reshape(labelTensor, labelTensor.shape);
+    l_check = graph.reshape(ffn.y, ffn.y.shape);
 
-    // optimizer = new RMSPropOptimizer(learningRate, momentum);
-    optimizer = new SGDOptimizer(learningRate);
+    optimizer = new MomentumOptimizer(learningRate, momentum);
+    // optimizer = new SGDOptimizer(learningRate);
 
     NUM_BATCHES = 100;
     for (let i = 0; i < NUM_BATCHES; i++) {
         // Train takes a cost tensor to minimize. Trains one batch. Returns the
         // average cost as a Scalar.
-        const [l1, p1, x1, t1] =
-            session.evalAll(
-                [ffn.logits, ffn.p, x_check, l_check],
-                feedEntries
+        if(printInfo){
+            /*
+            const [p1, x1, t1] = session.evalAll(
+                [ffn.output, x_check, l_check], feedEntries
             );
-        /*
-        console.log("l ==>", l1.dataSync());
-        console.log("p ==>", p1.dataSync());
-        console.log("x ==>", x1.dataSync());
-        console.log("t ==>", t1.dataSync());
-        */
-        console.log("p ==>", p1.dataSync());
-        console.log("t ==>", t1.dataSync());
+            console.log("p:", p1.dataSync(), "t:", t1.dataSync());
+            */
+            for(let i = 0; i <= 100; i++){
+                let input = Array1D.new(ds[i].input);
+                let target = ds[i].output; 
+                let pred = session.eval(
+                    ffn.output, [{tensor: ffn.x, data: input}]
+                );
+                console.log("p:", pred.dataSync(), "t:", target);
+            }
+        }
+        
 
         const cost = session.train(
-            costTensor, feedEntries, batchSize, optimizer, CostReduction.MEAN
+            ffn.cost, feedEntries, batchSize, optimizer, CostReduction.MEAN
         );
-
         costVal = await cost.val();
         console.log('last average cost (' + i + '): ' + costVal);
     }
 
 }
 
+async function demoLSTM(printInfo=false){
+
+    math = ENV.math;
+    const graph = new Graph();
+    const session = new Session(graph, math);
+
+    // await firstLearn();
+
+    let batchSize = 64;
+    let hiddenSize = 8;
+    let outputSize = 1;
+    let learningRate = 0.2;
+    let momentum = 0.9;
+    let seqLen = 2;
+    let noise = 0.4;
+
+    let [ds, xProvider, hProvider, cProvider, lProvider] = getDataSet({
+        datasetSize: 10 * batchSize,
+        dim: 1,
+        seq_len: seqLen / 2,
+        outputSize: outputSize,
+        noise: noise
+    })
+
+    const lstm = new LSTMCell({
+        graph: graph, nPredictions: outputSize,
+        hidden_size: hiddenSize, input_size: seqLen
+    });
+
+    // Maps tensors to InputProviders.
+    xFeed = {tensor: lstm.x, data: xProvider};
+    lFeed = {tensor: lstm.y, data: lProvider};
+    hFeed = {tensor: lstm.h_tm1, data: hProvider};
+    cFeed = {tensor: lstm.c_tm1, data: cProvider};
+
+    feedEntries = [xFeed, lFeed, hFeed, cFeed];
+
+    x_check = graph.reshape(lstm.x, lstm.x.shape);
+    l_check = graph.reshape(lstm.y, lstm.y.shape);
+
+    optimizer = new MomentumOptimizer(learningRate, momentum);
+    // optimizer = new SGDOptimizer(learningRate);
+
+    NUM_BATCHES = 1000;
+    for (let i = 0; i < NUM_BATCHES; i++) {
+        // Train takes a cost tensor to minimize. Trains one batch. Returns the
+        // average cost as a Scalar.
+        if(printInfo){
+            /*
+            const [p1, x1, t1] = session.evalAll(
+                [ffn.output, x_check, l_check], feedEntries
+            );
+            console.log("p:", p1.dataSync(), "t:", t1.dataSync());
+            */
+            for(let i = 0; i <= 100; i++){
+                let input = Array1D.new(ds[i].input);
+                let target = ds[i].output; 
+                let pred = session.eval(
+                    lstm.output, [
+                        {tensor: lstm.x, data: input},
+                        {tensor: lstm.c_tm1, data: Array1D.zeros([hiddenSize])},
+                        {tensor: lstm.h_tm1, data: Array1D.zeros([hiddenSize])}
+                    ]
+                );
+                console.log("p:", pred.dataSync(), "t:", target);
+            }
+        }
+        
+
+        const cost = session.train(
+            lstm.cost, feedEntries, batchSize, optimizer, CostReduction.MEAN
+        );
+        costVal = await cost.val();
+        console.log('last average cost (' + i + '): ' + costVal);
+    }
+
+}
+
+
 function idt(graph, x){
     return(graph.reshape(x, x.shape));
 }
+
+
 
 function slightlyModifiedTestExample(printInfo=false){
     const g = new Graph();
@@ -831,6 +1057,7 @@ function slightlyModifiedTestExample(printInfo=false){
     let datasetSize = 640;
     let noise = 0.49;
 
+
     // Placeholders are input containers. This is the container for where we will
     // feed an input NDArray when we execute the graph.
     const inputShape = [seqLen];
@@ -838,9 +1065,36 @@ function slightlyModifiedTestExample(printInfo=false){
     const inputTensor = g.placeholder('input', inputShape);
     const labelTensor = g.placeholder('label', [labelShape]);
 
+    const EPSILON = 1e-7;
     // Variables are containers that hold a value that can be updated from
     // training.
     // Here we initialize the multiplier variable randomly.
+    const hiddenLayer = g.layers.dense(
+        'hiddenLayer', inputTensor, hiddenSize,
+        (x) => g.relu(x),
+        true
+    );
+    const outputTensor = g.layers.dense(
+        'outputLayer', hiddenLayer, labelShape,
+        (x) => g.sigmoid(x),
+        true
+    );
+    const costTensor = g.reduceSum(g.add(
+        g.multiply(
+            g.constant([-1]),
+            g.multiply(
+                outputTensor, g.log(g.add(outputTensor, g.constant([EPSILON]))))),
+        g.multiply(
+            g.constant([-1]),
+            g.multiply(
+                g.subtract(g.constant([1]), outputTensor),
+                g.log(g.add(
+                    g.subtract(g.constant([1]), outputTensor),
+                    g.constant([EPSILON])))))));
+    const optimizer = new MomentumOptimizer(learningRate, momentum);
+  
+
+    /*
     const multiplier = g.variable(
         'multiplier',
         Array2D.randNormal([labelShape, seqLen + 1])
@@ -850,14 +1104,15 @@ function slightlyModifiedTestExample(printInfo=false){
     const eInput = g.concat1d(inputTensor, g.constant(Array1D.ones([1])));
     const lin = g.matmul(multiplier, eInput);
     const outputTensor = g.sigmoid(lin);
-    const costTensor = g.meanSquaredCost(outputTensor, labelTensor);
+    const costTensor = customSigmoidCost(g, outputTensor, labelTensor);
     // const costTensor = g.softmaxCrossEntropyCost(lin, labelTensor);
 
     const optimizer = new MomentumOptimizer(learningRate, momentum);
     // const optimizer = new AdamOptimizer(learningRate, momentum);
     // const optimizer = new AdagradOptimizer(learningRate);
+    */
 
-    let [inputProvider, , , labelProvider] = getDataSet({
+    let [ds, inputProvider, , , labelProvider] = getDataSet({
         datasetSize: datasetSize,
         dim: 1,
         seq_len: seqLen / 2,
@@ -871,7 +1126,7 @@ function slightlyModifiedTestExample(printInfo=false){
         {tensor: labelTensor, data: labelProvider}
     ];
 
-    const NUM_BATCHES = 100;
+    const NUM_BATCHES = 1000;
     for (let i = 0; i < NUM_BATCHES; i++) {
         // Train takes a cost tensor to minimize. Trains one batch. Returns the
         // average cost as a Scalar.
@@ -892,12 +1147,13 @@ function slightlyModifiedTestExample(printInfo=false){
     }
 }
 
+/*
 testExample({});
 testExample({withTanh: true});
 testExample({withSigmoid: true});
 testExample({withCustomSigmoid: true});
 testExample({withSuperCustomSigmoid: true});
-// slightlyModifiedTestExample(printInfo=true);
-
-
-// demoFFN1D();
+slightlyModifiedTestExample(printInfo=false);
+demoFFN1D(printInfo=true);
+*/
+demoLSTM(printInfo=false);
