@@ -18,8 +18,14 @@ const {
     NDArray,
     NDArrayMath,
     MathBackendCPU,
-    InCPUMemoryShuffledInputProviderBuilder
+    InCPUMemoryShuffledInputProviderBuilder,
 } = require('./node_modules/deeplearn/dist/deeplearn')
+
+
+const {
+    Initializer, VarianceScalingInitializer, ZerosInitializer,
+    NDArrayInitializer
+} = require('./node_modules/deeplearn/dist/deeplearn');
 
 const {
     getPalindromeDataset,
@@ -162,8 +168,6 @@ class FFN1D {
 
 }
 
-
-
 class FFN {
     constructor({
         graph, input_size=2, hidden_size=3, batch_size=4, nonlin='tanh',
@@ -210,78 +214,250 @@ class FFN {
     }
 
 }
- class LSTMCell{
+
+class LSTMCell{
     constructor({
-        graph, input_size=2, hidden_size=3, nPredictions=1
+        graph, input_size=2, hidden_size=3, nPredictions=1,
+        x=null, h_tm1=null, c_tm1=null, add_cost=true, weights=null
     }){
+        this.weights = weights;
         this.input_size = input_size;
         this.hidden_size = hidden_size;
 
+        let bi_i, bf_i, bc_i, bo_i, bout_i;
+        let Wi_i, Wf_i, Wc_i, Wo_i, Wout_i;
+
+        let Wi, bi, Wf, bf, Wc, bc, Wo, bo, Wout, bout;
+
+        if (weights !== null){
+            //
+            [[Wi, bi], [Wf, bf], [Wc, bc], [Wo, bo], [Wout, bout]] = [
+                weights['i'], weights['f'], weights['c'], weights['o'],
+                weights['out']
+            ];
+
+            let setValues = [];
+            let vars = [Wi, bi, Wf, bf, Wc, bc, Wo, bo, Wout, bout];
+            for (let ival of vars){
+                let ndarrayData = new NDArrayInitializer(ival);
+                setValues.push(ndarrayData);
+            }
+
+            [
+                Wi_i, bi_i, 
+                Wf_i, bf_i, 
+                Wc_i, bc_i,
+                Wo_i, bo_i,
+                Wout_i, bout_i
+            ] = setValues;
+
+        }else{
+            let b_init = new ZerosInitializer();
+            [bi_i, bf_i, bc_i, bo_i, bout_i] = [
+                b_init, b_init, b_init, b_init, b_init 
+            ];
+
+            let W_init = new VarianceScalingInitializer();
+            [Wi_i, Wf_i, Wc_i, Wo_i, Wout_i] = [
+                W_init, W_init, W_init, W_init, W_init 
+            ];
+        }
+
         this.x = graph.placeholder('x', [input_size]);
-        this.y = graph.placeholder('y', [nPredictions]);
-        this.c_tm1 = graph.placeholder('c_tm1', [hidden_size]);
-        this.h_tm1 = graph.placeholder('h_tm1', [hidden_size]);
+        if (h_tm1 === null){
+            this.h_tm1 = graph.placeholder('h_tm1', [hidden_size]);
+            this.c_tm1 = graph.placeholder('c_tm1', [hidden_size]);
+        }else{
+            this.h_tm1 = h_tm1;
+            this.h_tm1 = c_tm1;
+        }
 
         let XHC_prev = graph.concat1d(
             this.x, graph.concat1d(this.h_tm1, this.c_tm1)
-        )
-        let XH = graph.concat1d(this.x, this.h_tm1)
+        );
 
-        this.i = graph.layers.dense(
+        let XH = graph.concat1d(this.x, this.h_tm1);
+
+        /*
+        console.log(XHC_prev);
+        console.log(Wi_i);
+        console.log(bi_i);
+        console.log(hidden_size);
+        */
+        [[this.Wi, this.bi], this.i] = addDense(
+            graph,
             'i', XHC_prev, hidden_size,
-            (x) => graph.sigmoid(x), true);
-        this.f = graph.layers.dense(
-            'f', XHC_prev, hidden_size,
-            (x) => graph.sigmoid(x), true);
+            (x) => graph.sigmoid(x), true,
+            Wi_i, bi_i
+            );
+             // graph.layers.dense(
 
+        [[this.Wf, this.bf], this.f] = addDense(
+            graph,
+            'f', XHC_prev, hidden_size,
+            (x) => graph.sigmoid(x), true,
+            Wf_i, bf_i
+            );
+            // graph.layers.dense(
+
+        let half_c;
+        [[this.Wc, this.bc], half_c] = addDense(
+            graph,
+            'c_half', XH, hidden_size,
+            (x) => graph.tanh(x), true,
+            Wc_i, bc_i
+            )
+            //graph.layers.dense(
         this.c = graph.add(
             graph.multiply(this.f, this.c_tm1),
-            graph.multiply(
-                this.i,
-                graph.layers.dense(
-                    'c_half', XH, hidden_size,
-                    (x) => graph.tanh(x), true)
-            )
+            graph.multiply(this.i, half_c)
         );
 
         let XHC = graph.concat1d(
             this.x, graph.concat1d(this.h_tm1, this.c)
-        )
+        );
 
-        this.o = graph.layers.dense(
+        [[this.Wo, this.bo], this.o] = addDense(
+            graph,
             'o', XHC, hidden_size,
-            (x) => graph.sigmoid(x), true);
+            (x) => graph.sigmoid(x), true,
+            Wo_i, bo_i
+            );
+            // graph.layers.dense(
 
         // define h
         this.h = graph.multiply(this.o, graph.tanh(this.c));
 
-        this.output = graph.layers.dense(
+        [[this.Wout, this.bout], this.output] = addDense(
+            graph,
             'classif', this.h, nPredictions,
-            (x) => graph.sigmoid(x), true);
+            (x) => graph.sigmoid(x), true,
+            Wout_i, bout_i
+            );
+            // graph.layers.dense(
 
-
-        const EPSILON = 1e-7;
-        this.cost = graph.reduceSum(graph.add(
-            graph.multiply(
-                graph.constant([-1]),
+        if (add_cost){
+            this.y = graph.placeholder('y', [nPredictions]);
+            const EPSILON = 1e-7;
+            this.cost = graph.reduceSum(graph.add(
                 graph.multiply(
-                    this.y,
-                    graph.log(
-                        graph.add(this.output, graph.constant([EPSILON]))))),
-            graph.multiply(
-                graph.constant([-1]),
+                    graph.constant([-1]),
+                    graph.multiply(
+                        this.y,
+                        graph.log(
+                            graph.add(
+                                this.output, graph.constant([EPSILON]))))),
                 graph.multiply(
-                    graph.subtract(graph.constant([1]), this.y),
-                    graph.log(
-                        graph.add(
-                            graph.subtract(graph.constant([1]), this.output),
-                            graph.constant([EPSILON])))))));
+                    graph.constant([-1]),
+                    graph.multiply(
+                        graph.subtract(graph.constant([1]), this.y),
+                        graph.log(
+                            graph.add(
+                                graph.subtract(
+                                    graph.constant([1]), this.output),
+                                graph.constant([EPSILON])))))));
+        }
 
         console.log("nPredictions:", nPredictions)
 
+        this.weights = {
+            'i': [this.Wi, this.bi],
+            'f': [this.Wf, this.bf],
+            'c': [this.Wc, this.bc],
+            'o': [this.Wo, this.bo],
+            'out': [this.Wout, this.bout]
+        };
+
+    }
+
+    getWeights(session){
+        let weights = {};
+        for (let [k, v] of Object.entries(this.weights)){
+            let w_b = session.evalAll(v);
+            let val = []
+            for (let x of w_b){
+                let ar;
+                if (x.shape.length > 1){
+                    ar = new Array2D.new(x.shape, x.dataSync());
+                }else{
+                    ar = new Array1D.new(x.dataSync());
+                }
+                val.push(ar);
+            }
+            weights[k] = val;
+        }
+        return(weights);
     }
 }
 
+class RNN{
+    constructor({
+        graph, inputSize=2, hiddenSize=3, nPredictions=1,
+        cell=LSTMCell, seqLength=10
+    }){
+        // this.h_0 = new Array1D.zeros([hiddenSize]),
+        this.h_t0 = graph.placeholder('h_t0', [hiddenSize]);
+        this.c_t0 = graph.placeholder('c_t0', [hiddenSize]);
+        this.x = graph.placeholder('x', [seqLength, inputSize]);
+        this.cells = []
+        let weightInit = null
+        for(let i = 0; i < seqLength; i++){
+            // shared parameters ?
+            // this.cell 
+            let cell = new LSTMCell({
+                graph, input_size: inputSize, hidden_size: hiddenSize,
+                nPredictions: nPredictions,
+                h_tm1: h_tm1, c_tm1: c_tm1,
+                add_cost: false,
+                weights: weightInit
+            });
+
+            if (prevWeights === null){
+                weightInit = cell.getWeights();
+            }
+            cells.push(cell)
+        }
+    }
+
+    sumGradient(){
+        let gradientsAcc = {};
+        
+        for (cell of this.cells){
+            for (let [k, v] of Object.entries(cell.weights)){
+                let w_b = session.evalAll(v);
+                let val = [];
+                let init_w_b = this.weightInit[k];
+                let i = 0;
+                for (let x of w_b){
+                    // let ar;
+                    let diff = x.dataSync() - init_w_b[i];
+                    if (! (k in gradientsAcc)){
+                        val.push(diff);
+                    }else{
+                        let prev = gradientsAcc[k][i]
+                        val.push(prev + diff);
+                    }
+                    /*
+                    if (x.shape.length > 1){
+                        ar = new Array2D.new(x.shape, diff);
+                    }else{
+                        ar = new Array1D.new(diff);
+                    }
+                    val.push(ar);
+                    */
+                    i += 1;
+                }
+                gradientsAcc[k] = val;
+            }
+        }
+
+        return(gradientsAcc);
+    }
+
+    getUpdatedWeight(){
+
+    }
+}
 
 class LSTMCellOld {
     constructor({
@@ -982,9 +1158,24 @@ async function demoLSTM(printInfo=false){
         noise: noise
     })
 
-    const lstm = new LSTMCell({
+    const lstmPre = new LSTMCell({
         graph: graph, nPredictions: outputSize,
         hidden_size: hiddenSize, input_size: seqLen
+    });
+
+    let weights = lstmPre.getWeights(session);
+
+    const lstm = new LSTMCell({
+        graph: graph, nPredictions: outputSize,
+        hidden_size: hiddenSize, input_size: seqLen,
+        weights: weights
+    });
+
+    const rnn = new RNN({
+        graph: graph, nPredictions: outputSize,
+        hiddenSize: hiddenSize, inputSize: seqLen,
+        weights: weights
+
     });
 
     // Maps tensors to InputProviders.
@@ -1026,7 +1217,6 @@ async function demoLSTM(printInfo=false){
             }
         }
         
-
         const cost = session.train(
             lstm.cost, feedEntries, batchSize, optimizer, CostReduction.MEAN
         );
@@ -1036,12 +1226,9 @@ async function demoLSTM(printInfo=false){
 
 }
 
-
 function idt(graph, x){
     return(graph.reshape(x, x.shape));
 }
-
-
 
 function slightlyModifiedTestExample(printInfo=false){
     const g = new Graph();
@@ -1092,8 +1279,6 @@ function slightlyModifiedTestExample(printInfo=false){
                     g.subtract(g.constant([1]), outputTensor),
                     g.constant([EPSILON])))))));
     const optimizer = new MomentumOptimizer(learningRate, momentum);
-  
-
     /*
     const multiplier = g.variable(
         'multiplier',
@@ -1147,6 +1332,66 @@ function slightlyModifiedTestExample(printInfo=false){
     }
 }
 
+/* stolen from graph/graph.ts + modified */
+function addDense(
+    graph, name, x, units,
+    activation, useBias = true,
+    kernelInitializer = new VarianceScalingInitializer(),
+    biasInitializer = new ZerosInitializer()
+){
+    initialization = 
+        kernelInitializer.initialize([x.shape[0], units], x.shape[0], units);
+    const weights = graph.variable(name + '-weights', initialization);
+
+    let lin;
+    let out;
+    let toReturn = [];
+    const mm = graph.matmul(x, weights);
+
+    toReturn.push(weights);
+
+    if (useBias) {
+        const bias = graph.variable(
+            name + '-bias',
+            biasInitializer.initialize([units], x.shape[0], units));
+        lin = graph.add(mm, bias);
+        toReturn.push(bias);
+    }else{
+        lin = mm;
+    }
+
+    if (activation != null) {
+        out = activation(lin);
+    }
+
+    return([toReturn, out]);
+}
+
+function denseToy(){
+
+    inlayer = graph.placeholder("ti", [10]);
+    testi = graph.layers.dense(
+        'test', inlayer, 10,
+        (x) => g.sigmoid(x),
+        true
+    );
+
+    for (node of graph.nodes){
+        console.log(node.name)
+    }
+
+    // new NDArrayInitializer(NDArray.zeros([10]))
+
+    kernelInitializer = new VarianceScalingInitializer(),
+    testv = graph.variable(
+        's',
+        kernelInitializer.initialize([1, 10], 1, 10)
+    );
+
+    session.eval(testv).dataSync()
+
+}
+
 /*
 testExample({});
 testExample({withTanh: true});
@@ -1157,3 +1402,5 @@ slightlyModifiedTestExample(printInfo=false);
 demoFFN1D(printInfo=true);
 */
 demoLSTM(printInfo=false);
+
+
