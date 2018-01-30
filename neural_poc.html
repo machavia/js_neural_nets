@@ -42,6 +42,11 @@
                     id='noise' type='text' value=0
                     style="width: 50px"
                 \>
+                dim: <input
+                    id='dim' type='text' value=1
+                    style="width: 50px"
+                \>
+
             </fieldset>
           </div>
 
@@ -58,6 +63,11 @@
             <fieldset>
                 lr: <input
                     id='lr' type='text' value=0.2
+                    style="width: 50px"
+                \>
+
+                momentum: <input
+                    id='momentum' type='text' value=0.9
                     style="width: 50px"
                 \>
 
@@ -78,6 +88,11 @@
 
                 n_output: <input
                     id='n_output' type='text' value=1
+                    style="width: 50px"
+                >
+
+                batch_size: <input
+                    id='batch_size' type='text' value=1
                     style="width: 50px"
                 >
                 
@@ -112,6 +127,7 @@
 <script src="./bower_components/brain.js/browser.js"></script>
 <script src="jquery-3.2.1.min.js"></script>
 <script src="./synaptic.js"></script>
+<script src="./deepmodels.js"></script>
 <script src="./utils.js"></script>
 <script src="./neural_poc.js"></script>
 

@@ -1,3 +1,10 @@
+deepTrain = deepmodels.deepTrain;
+getDeepModel = deepmodels.getDeepModel;
+dsToDeepDS = deepmodels.dsToDeepDS;
+FFN1D = deepmodels.FFN1D;
+RNNShared = deepmodels.RNNShared;
+LSTMCell = deepmodels.LSTMCell;
+
 // Start of module boilerplate, insures that code is useable both
 // on server side and client side
 (function(exports){
@@ -266,7 +273,8 @@ function getCheckerDataset({datasetSize=1000}){
 function learnModel({
     model_type='ffn_synaptic', hidden_size=[1],
     rate=0.2, iterations=100, error=0.005, train_set_size=1000,
-    trainSet=null, input_size=1, output_size=1
+    trainSet=null, input_size=1, output_size=1, momentum=0.9,
+    batchSize=64, seqLength=null
 }){
 
     const Architect = synaptic.Architect;
@@ -274,6 +282,15 @@ function learnModel({
     const Trainer = synaptic.Trainer;
 
     let model;
+
+    let getDeep = (x) => {
+        return(deepmodels.getDeepModel({
+            nPredictions: output_size,
+            hiddenSize: hidden_size,
+            inputSize: input_size,
+            seqLength: seqLength
+        }));
+    }
 
     switch(model_type){
         case "lstm_synaptic":
@@ -303,6 +320,15 @@ function learnModel({
                 "hidden_size": hidden_size,
             });
             break;
+        case 'lstmcell_deeplearn':
+            model = getDeep('LSTM');
+            break;
+        case 'lstm_deeplearn':
+            model = getDeep('RNNLSTM');
+            break;
+        case 'ffn_deeplearn':
+            model = getDeep('FFN1D');
+            break;
     }
 
     if(model_type.match('.*_synaptic')){
@@ -330,6 +356,17 @@ function learnModel({
               learningRate: rate    // learning rate
             }
         );
+    }else if(model_type.match('.*_deeplearn')){
+
+        deepTrain({
+            model: model,
+            printInfo: false,
+            dsProviders: trainSet,
+            batchSize: batchSize,
+            learningRate: rate,
+            momentum: momentum
+        });
+
     }
 
     return(model);

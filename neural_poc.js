@@ -44,13 +44,15 @@ window.onload = function(){
         }
         datasetSize = parseInt(datasetSize)
         if($("#data").val() == 'palindrome'){
-            return(getPalindromeDataset({
+            let ds = getPalindromeDataset({
                 datasetSize: datasetSize,
                 seq_len: $("#seq_len").val(),
                 vocab_size: $("#vocab_size").val(),
                 flatten: flatten, 
-                noise: $("#noise").val()
-            }));
+                noise: $("#noise").val(),
+                dim: $("#dim").val()
+            });
+            return(ds);
         }else if($("#data").val() == 'mnist'){
             return(getMNISTDataset({datasetSize: datasetSize}));
         }else if($("#data").val() == 'checker'){
@@ -103,7 +105,7 @@ window.onload = function(){
             model = learnModel({
                 model_type: $("#algo").val(),
                 rate: $("#lr").val(),
-                batch_num: 1,
+                batchSize: $("#batch_size"),
                 iterations: $("#iter").val(),
                 trainSet: trainSet,
                 input_size: $("#n_input").val(),
