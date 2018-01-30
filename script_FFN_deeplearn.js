@@ -21,7 +21,6 @@ const {
     InCPUMemoryShuffledInputProviderBuilder,
 } = require('./node_modules/deeplearn/dist/deeplearn')
 
-
 const {
     Initializer, VarianceScalingInitializer, ZerosInitializer,
     NDArrayInitializer
@@ -269,7 +268,7 @@ class LSTMCell{
             this.c_tm1 = graph.placeholder('c_tm1', [hidden_size]);
         }else{
             this.h_tm1 = h_tm1;
-            this.h_tm1 = c_tm1;
+            this.c_tm1 = c_tm1;
         }
 
         let XHC_prev = graph.concat1d(
@@ -390,43 +389,265 @@ class LSTMCell{
     }
 }
 
+class LSTMCellShared{
+    constructor({
+        graph, input_size=2, hidden_size=3, nPredictions=1,
+        x=null, h_tm1=null, c_tm1=null, add_cost=true, sharedVariables=null
+    }){
+        this.sharedVariables = sharedVariables;
+        this.input_size = input_size;
+        this.hidden_size = hidden_size;
+
+        let bi_i, bf_i, bc_i, bo_i, bout_i;
+        let Wi_i, Wf_i, Wc_i, Wo_i, Wout_i;
+
+        let Wi, bi, Wf, bf, Wc, bc, Wo, bo, Wout, bout;
+
+        if (this.sharedVariables !== null){
+            //
+            [[Wi, bi], [Wf, bf], [Wc, bc], [Wo, bo], [Wout, bout]] = [
+                this.sharedVariables['i'], this.sharedVariables['f'],
+                this.sharedVariables['c'], this.sharedVariables['o'],
+                this.sharedVariables['out']
+            ];
+
+            let setValues = [];
+            let vars = [Wi, bi, Wf, bf, Wc, bc, Wo, bo, Wout, bout];
+
+            [
+                Wi_i, bi_i, 
+                Wf_i, bf_i, 
+                Wc_i, bc_i,
+                Wo_i, bo_i,
+                Wout_i, bout_i
+            ] = setValues;
+
+        }else{
+            [bi_i, bf_i, bc_i, bo_i, bout_i] = [
+                null, null, null, null, null 
+            ];
+
+            [Wi_i, Wf_i, Wc_i, Wo_i, Wout_i] = [
+                null, null, null, null, null 
+            ];
+        }
+
+        this.x = x === null ?
+            graph.placeholder('x', [input_size]):
+            x;
+
+        if (h_tm1 === null){
+            this.h_tm1 = graph.placeholder('h_tm1', [hidden_size]);
+            this.c_tm1 = graph.placeholder('c_tm1', [hidden_size]);
+        }else{
+            this.h_tm1 = h_tm1;
+            this.c_tm1 = c_tm1;
+        }
+
+        let XHC_prev = graph.concat1d(
+            this.x, graph.concat1d(this.h_tm1, this.c_tm1)
+        );
+
+        let XH = graph.concat1d(this.x, this.h_tm1);
+
+        [[this.Wi, this.bi], this.i] = addDense(
+            graph,
+            'i', XHC_prev, hidden_size,
+            (x) => graph.sigmoid(x), true,
+            null, null, Wi_i, bi_i
+            );
+             // graph.layers.dense(
+
+        [[this.Wf, this.bf], this.f] = addDense(
+            graph,
+            'f', XHC_prev, hidden_size,
+            (x) => graph.sigmoid(x), true,
+            null, null, Wf_i, bf_i
+            );
+            // graph.layers.dense(
+
+        let half_c;
+        [[this.Wc, this.bc], half_c] = addDense(
+            graph,
+            'c_half', XH, hidden_size,
+            (x) => graph.tanh(x), true,
+            null, null, Wc_i, bc_i
+            )
+            //graph.layers.dense(
+        this.c = graph.add(
+            graph.multiply(this.f, this.c_tm1),
+            graph.multiply(this.i, half_c)
+        );
+
+        let XHC = graph.concat1d(
+            this.x, graph.concat1d(this.h_tm1, this.c)
+        );
+
+        [[this.Wo, this.bo], this.o] = addDense(
+            graph,
+            'o', XHC, hidden_size,
+            (x) => graph.sigmoid(x), true,
+            null, null, Wo_i, bo_i
+            );
+            // graph.layers.dense(
+
+        // define h
+        this.h = graph.multiply(this.o, graph.tanh(this.c));
+
+        [this.Wout, this.bout] = [null, null];
+
+        if (add_cost){
+
+            [[this.Wout, this.bout], this.output] = addDense(
+                graph,
+                'classif', this.h, nPredictions,
+                (x) => graph.sigmoid(x), true,
+                null, null, null, null 
+                );
+                // graph.layers.dense(
+
+            this.y = graph.placeholder('y', [nPredictions]);
+            const EPSILON = 1e-7;
+            this.cost = graph.reduceSum(graph.add(
+                graph.multiply(
+                    graph.constant([-1]),
+                    graph.multiply(
+                        this.y,
+                        graph.log(
+                            graph.add(
+                                this.output, graph.constant([EPSILON]))))),
+                graph.multiply(
+                    graph.constant([-1]),
+                    graph.multiply(
+                        graph.subtract(graph.constant([1]), this.y),
+                        graph.log(
+                            graph.add(
+                                graph.subtract(
+                                    graph.constant([1]), this.output),
+                                graph.constant([EPSILON])))))));
+        }
+
+        console.log("nPredictions:", nPredictions)
+
+        this.weights = {
+            'i': [this.Wi, this.bi],
+            'f': [this.Wf, this.bf],
+            'c': [this.Wc, this.bc],
+            'o': [this.Wo, this.bo],
+            'out': [this.Wout, this.bout]
+        };
+
+    }
+
+}
+
+class RNNShared{
+
+    constructor({
+        graph, session, inputSize=2, hiddenSize=3, nPredictions=1,
+        cellClass=LSTMCellShared, seqLength=10, init_weights=null,
+        sharedVariables=null
+    }){
+
+        // this.h_t0 = graph.placeholder('h_t0', [hiddenSize]);
+        // this.c_t0 = graph.placeholder('c_t0', [hiddenSize]);
+        this.h_t0 = graph.constant(Array1D.zeros([hiddenSize]));
+        this.c_t0 = graph.constant(Array1D.zeros([hiddenSize]));
+        this.x = graph.placeholder('x', [seqLength, inputSize]);
+        this.xs = [];
+        this.cells = [];
+        this.sharedVariables = init_weights;
+        let [c_tm1, h_tm1] = [null, null];
+
+        for(let i = 0; i < seqLength; i++){
+            /*
+            TODO ok a bit dirty: in absence of a gather or slice
+            op we multiply x by a indicator vector with size=n_rows(x)
+            with one at the index we wish to keep for step, zeros elsewhere...
+            */
+            let indicator = Array1D.zeros([this.x.shape[0]]);
+            indicator.set(1, i);
+            let indicatorTensor = graph.constant(indicator);
+            this.xs.push(graph.matmul(indicatorTensor, this.x));
+            // shared parameters ?
+            // this.cell
+            let add_cost = false;
+            if (i === seqLength - 1){
+                add_cost = true;
+            }
+            if (i === 0){
+                c_tm1 = this.c_t0;
+                h_tm1 = this.h_t0;
+            }
+
+            let cell = new cellClass({
+                graph, input_size: inputSize, hidden_size: hiddenSize,
+                nPredictions: nPredictions,
+                h_tm1: h_tm1, c_tm1: c_tm1,
+                add_cost: add_cost,
+                sharedVariables: this.sharedVariables,
+                x: this.xs[i]
+            });
+
+            c_tm1 = cell.c;
+            h_tm1 = cell.h;
+
+            if (add_cost){
+                // cost, target will be the same as last cell
+                this.y = cell.y,
+                this.output = cell.output;
+                this.cost = cell.cost;
+            }
+
+            if (this.sharedVariables === null){
+                this.sharedVariables = cell.sharedVariables;
+            }
+
+            this.cells.push(cell)
+        }
+    }
+}
+
 class RNN{
     constructor({
-        graph, inputSize=2, hiddenSize=3, nPredictions=1,
-        cell=LSTMCell, seqLength=10
+        graph, session, inputSize=2, hiddenSize=3, nPredictions=1,
+        cell=LSTMCell, seqLength=10, init_weights=null,
+        sharedVariables=null
     }){
-        // this.h_0 = new Array1D.zeros([hiddenSize]),
+
         this.h_t0 = graph.placeholder('h_t0', [hiddenSize]);
         this.c_t0 = graph.placeholder('c_t0', [hiddenSize]);
         this.x = graph.placeholder('x', [seqLength, inputSize]);
-        this.cells = []
-        let weightInit = null
+        this.cells = [];
+        this.prevWeights = init_weights;
+
         for(let i = 0; i < seqLength; i++){
             // shared parameters ?
             // this.cell 
             let cell = new LSTMCell({
                 graph, input_size: inputSize, hidden_size: hiddenSize,
                 nPredictions: nPredictions,
-                h_tm1: h_tm1, c_tm1: c_tm1,
+                h_tm1: this.h_t0, c_tm1: this.c_t0,
                 add_cost: false,
-                weights: weightInit
+                weights: this.prevWeights
             });
 
-            if (prevWeights === null){
-                weightInit = cell.getWeights();
+            if (this.prevWeights === null){
+                this.prevWeights = cell.getWeights(session);
             }
-            cells.push(cell)
+
+            this.cells.push(cell)
         }
     }
 
-    sumGradient(){
+    sumGradient(session){
         let gradientsAcc = {};
         
-        for (cell of this.cells){
+        for (let cell of this.cells){
             for (let [k, v] of Object.entries(cell.weights)){
                 let w_b = session.evalAll(v);
                 let val = [];
-                let init_w_b = this.weightInit[k];
+                let init_w_b = this.prevWeights[k];
                 let i = 0;
                 for (let x of w_b){
                     // let ar;
@@ -437,14 +658,6 @@ class RNN{
                         let prev = gradientsAcc[k][i]
                         val.push(prev + diff);
                     }
-                    /*
-                    if (x.shape.length > 1){
-                        ar = new Array2D.new(x.shape, diff);
-                    }else{
-                        ar = new Array1D.new(diff);
-                    }
-                    val.push(ar);
-                    */
                     i += 1;
                 }
                 gradientsAcc[k] = val;
@@ -454,9 +667,7 @@ class RNN{
         return(gradientsAcc);
     }
 
-    getUpdatedWeight(){
-
-    }
+    getUpdatedWeight(){}
 }
 
 class LSTMCellOld {
@@ -712,7 +923,7 @@ async function firstLearn(){
 
 function getDataSet({
     datasetSize, dim=1, flatten=true, seq_len=1, outputSize=2,
-    hiddenSize=8, noise=0
+    hiddenSize=8, noise=0, make2d=false
 }){
     
     let ds = getPalindromeDataset({
@@ -740,10 +951,17 @@ function getDataSet({
     let [xFeed, hFeed, cFeed, lFeed] = []
 
     for(dat of ds){
-        x.push(Array1D.new(dat.input));
-        labels.push(Array1D.new(dat.output));
-        h.push(Array1D.zeros([hiddenSize]));
-        c.push(Array1D.zeros([hiddenSize]));
+        if (make2d){
+            x.push(Array2D.new([2 * seq_len, dim], dat.input));
+            labels.push(Array1D.new(dat.output));
+            h.push(Array2D.zeros([2 * seq_len, hiddenSize]));
+            c.push(Array2D.zeros([2 * seq_len, hiddenSize]));
+        }else{
+            x.push(Array1D.new(dat.input));
+            labels.push(Array1D.new(dat.output));
+            h.push(Array1D.zeros([hiddenSize]));
+            c.push(Array1D.zeros([hiddenSize]));
+        }
     }
 
     // Shuffles inputs and labels and keeps them mutually in sync.
@@ -960,7 +1178,7 @@ function testExample({
             };
         }
     }else{
-        console.log("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+        console.log("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
         transformFunc = (x) => {return(x)};
         graphTransformFunc = (x) => {return(idt(grph, x))};
         learningRate = 0.1; // .00001
@@ -1015,27 +1233,6 @@ function testExample({
         }
         */
     }
-
-
-    /*
-    const inputs = [
-      Array1D.new([1.0, 2.0, 3.0]),
-      Array1D.new([10.0, 20.0, 30.0]),
-      Array1D.new([100.0, 200.0, 300.0]),
-      Array1D.new([1.0, 2.0, 3.0]),
-      Array1D.new([10.0, 20.0, 30.0]),
-      Array1D.new([100.0, 200.0, 300.0])
-    ];
-
-    const labels = [
-      Array1D.new([transformFunc(4.0)]),
-      Array1D.new([transformFunc(40.0)]),
-      Array1D.new([transformFunc(400.0)]),
-      Array1D.new([transformFunc(4.0)]),
-      Array1D.new([transformFunc(40.0)]),
-      Array1D.new([transformFunc(400.0)])
-    ];
-    */
 
     // Shuffles inputs and labels and keeps them mutually in sync.
     const shuffledInputProviderBuilder =
@@ -1171,13 +1368,6 @@ async function demoLSTM(printInfo=false){
         weights: weights
     });
 
-    const rnn = new RNN({
-        graph: graph, nPredictions: outputSize,
-        hiddenSize: hiddenSize, inputSize: seqLen,
-        weights: weights
-
-    });
-
     // Maps tensors to InputProviders.
     xFeed = {tensor: lstm.x, data: xProvider};
     lFeed = {tensor: lstm.y, data: lProvider};
@@ -1225,6 +1415,123 @@ async function demoLSTM(printInfo=false){
     }
 
 }
+
+async function demoLSTMRNN(){
+
+    math = ENV.math;
+    const graph = new Graph();
+    const session = new Session(graph, math);
+
+    // await firstLearn();
+
+    let batchSize = 64;
+    let hiddenSize = 8;
+    let outputSize = 1;
+    let learningRate = 0.2;
+    let momentum = 0.9;
+    let seqLen = 2;
+    let noise = 0.4;
+
+    let [ds, xProvider, hProvider, cProvider, lProvider] = getDataSet({
+        datasetSize: 10 * batchSize,
+        dim: 1,
+        seq_len: seqLen / 2,
+        outputSize: outputSize,
+        noise: noise
+    })
+
+    const rnn = new RNN({
+        graph: graph, session: session, nPredictions: outputSize,
+        hiddenSize: hiddenSize, inputSize: seqLen,
+        init_weights: null
+    });
+
+    rnn.sumGradient(session);
+
+}
+
+async function demoLSTMRNNShared({printInfo=false}){
+
+    math = ENV.math;
+    const graph = new Graph();
+    const session = new Session(graph, math);
+
+    // await firstLearn();
+
+    let batchSize = 64;
+    let hiddenSize = 32;
+    let outputSize = 1;
+    let learningRate = 0.1;
+    let momentum = 0.9;
+    let seqLength = 10;
+    let noise = 0.4;
+
+    let [ds, xProvider, hProvider, cProvider, lProvider] = getDataSet({
+        datasetSize: 10 * batchSize,
+        dim: 1,
+        seq_len: seqLength / 2,
+        outputSize: outputSize,
+        noise: noise,
+        make2d: true
+    })
+
+    const rnn = new RNNShared({
+        graph: graph, session: session, nPredictions: outputSize,
+        hiddenSize: hiddenSize, inputSize: 1, seqLength: seqLength,
+        init_weights: null
+    });
+
+    // Maps tensors to InputProviders.
+    xFeed = {tensor: rnn.x, data: xProvider};
+    lFeed = {tensor: rnn.y, data: lProvider};
+
+    feedEntries = [xFeed, lFeed];
+
+    x_check = graph.reshape(rnn.x, rnn.x.shape);
+    l_check = graph.reshape(rnn.y, rnn.y.shape);
+
+    optimizer = new MomentumOptimizer(learningRate, momentum);
+    // optimizer = new RMSPropOptimizer(learningRate, momentum);
+    // optimizer = new SGDOptimizer(learningRate);
+
+    NUM_BATCHES = 1000;
+    for (let i = 0; i < NUM_BATCHES; i++) {
+        // Train takes a cost tensor to minimize. Trains one batch. Returns the
+        // average cost as a Scalar.
+        if(printInfo){
+            /*
+            const [p1, x1, t1] = session.evalAll(
+                [rnn.output, x_check, l_check], feedEntries
+            );
+            console.log("p:", p1.dataSync(), "t:", t1.dataSync());
+            */
+            for(let i = 0; i <= 100; i++){
+                let input = Array1D.new(ds[i].input);
+                let target = ds[i].output; 
+                let pred = session.eval(
+                    rnn.output, [{tensor: rnn.x, data: input}]
+                );
+                try {
+                    console.log("p:", pred.dataSync(), "t:", target);
+                } catch (e){
+                    console.log("Error at dataSync", e);
+                }
+            }
+        }
+        
+        const cost = session.train(
+            rnn.cost, feedEntries, batchSize, optimizer, CostReduction.MEAN
+        );
+        try {
+            costVal = await cost.val();
+        } catch(e){
+            console.log("Error at await", e);
+        }
+        console.log('last average cost (' + i + '): ' + costVal);
+    }
+
+}
+
 
 function idt(graph, x){
     return(graph.reshape(x, x.shape));
@@ -1336,12 +1643,25 @@ function slightlyModifiedTestExample(printInfo=false){
 function addDense(
     graph, name, x, units,
     activation, useBias = true,
-    kernelInitializer = new VarianceScalingInitializer(),
-    biasInitializer = new ZerosInitializer()
+    kernelInitializer = null,
+    biasInitializer = null,
+    kernelVariable = null,
+    biasVariable = null
 ){
-    initialization = 
-        kernelInitializer.initialize([x.shape[0], units], x.shape[0], units);
-    const weights = graph.variable(name + '-weights', initialization);
+    if (kernelInitializer === null){
+         kernelInitializer = new VarianceScalingInitializer();
+    }
+    if (biasInitializer === null){
+        biasInitializer = new ZerosInitializer();
+    }
+    const weights = kernelVariable === null ?
+        graph.variable(
+            name + '-weights',
+            kernelInitializer.initialize(
+                [x.shape[0], units], x.shape[0], units
+            )
+        ) :
+        kernelVariable;
 
     let lin;
     let out;
@@ -1351,9 +1671,11 @@ function addDense(
     toReturn.push(weights);
 
     if (useBias) {
-        const bias = graph.variable(
-            name + '-bias',
-            biasInitializer.initialize([units], x.shape[0], units));
+        const bias = biasVariable === null ?
+            graph.variable(
+                name + '-bias',
+                biasInitializer.initialize([units], x.shape[0], units)):
+            biasVariable;
         lin = graph.add(mm, bias);
         toReturn.push(bias);
     }else{
@@ -1400,7 +1722,8 @@ testExample({withCustomSigmoid: true});
 testExample({withSuperCustomSigmoid: true});
 slightlyModifiedTestExample(printInfo=false);
 demoFFN1D(printInfo=true);
-*/
 demoLSTM(printInfo=false);
-
+demoLSTMRNN();
+*/
+demoLSTMRNNShared({});
 
