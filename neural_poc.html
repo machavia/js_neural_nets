@@ -31,7 +31,7 @@
             </fieldset>
             <fieldset id="pal_fset">
                 half_len: <input
-                    id='seq_len' type='text' value=5 name="seq_len"
+                    id='half_len' type='text' value=2
                     style="width: 50px"
                 \>
                 vocab_size: <input
@@ -53,6 +53,9 @@
           <div>
 
             algo: <select id='algo'>
+              <option value="lstm_deeplearn">lstm_deeplearn</option>
+              <option value="lstmcell_deeplearn">lstmcell_deeplearn</option>
+              <option value="ffn_deeplearn">ffn_deeplearn</option>
               <option value="ffn_brain">ffn_brain</option>
               <option value="ffn_synaptic">ffn_synaptic</option>
               <option value="lstm_brain">lstm_brain</option>
@@ -62,7 +65,7 @@
 
             <fieldset>
                 lr: <input
-                    id='lr' type='text' value=0.2
+                    id='lr' type='text' value=0.1
                     style="width: 50px"
                 \>
 
@@ -76,13 +79,9 @@
                     style="width: 50px"
                 >
 
-                n_input: <input
-                    id='n_input' type='text' value=10
-                    style="width: 50px"
-                >
 
                 n_hidden: <input
-                    id='n_hidden' type='text' value=32
+                    id='n_hidden' type='text' value=4
                     style="width: 50px"
                 >
 
@@ -92,10 +91,28 @@
                 >
 
                 batch_size: <input
-                    id='batch_size' type='text' value=1
+                    id='batch_size' type='text' value=16
+                    style="width: 50px"
+                >
+
+                n_input: <input
+                    id='n_input' type='text' value=1
                     style="width: 50px"
                 >
                 
+                seq_length: <input
+                    id='seq_length' type='text' value=4
+                    style="width: 50px"
+                >
+
+                optimizer: <select id='optimizer'>
+                  <option value="momentum">momentum</option>
+                  <option value="SGD">SGD</option>
+                  <option value="RMSProp">RMSProp</option>
+                  <option value="Adam">Adam</option>
+                  <option value="Adagrad">Adagrad</option>
+                </select> 
+
             </fieldset>
 
           </div> 
@@ -125,6 +142,7 @@
 
 <script src="./bower_components/mnist/dist/mnist.js"></script>
 <script src="./bower_components/brain.js/browser.js"></script>
+<script src="./node_modules/deeplearn/dist/deeplearn.min.js"></script>
 <script src="jquery-3.2.1.min.js"></script>
 <script src="./synaptic.js"></script>
 <script src="./deepmodels.js"></script>

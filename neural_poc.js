@@ -46,11 +46,11 @@ window.onload = function(){
         if($("#data").val() == 'palindrome'){
             let ds = getPalindromeDataset({
                 datasetSize: datasetSize,
-                seq_len: $("#seq_len").val(),
-                vocab_size: $("#vocab_size").val(),
+                halfSeqLen: parseInt($("#half_len").val()),
+                vocab_size: parseInt($("#vocab_size").val()),
                 flatten: flatten, 
-                noise: $("#noise").val(),
-                dim: $("#dim").val()
+                noise: parseFloat($("#noise").val()),
+                dim: parseInt($("#dim").val())
             });
             return(ds);
         }else if($("#data").val() == 'mnist'){
@@ -104,15 +104,16 @@ window.onload = function(){
 
             model = learnModel({
                 model_type: $("#algo").val(),
-                rate: $("#lr").val(),
-                batchSize: $("#batch_size"),
-                iterations: $("#iter").val(),
+                rate: parseFloat($("#lr").val()),
+                batchSize: parseInt($("#batch_size").val()),
+                iterations: parseInt($("#iter").val()),
                 trainSet: trainSet,
-                input_size: $("#n_input").val(),
+                input_size: parseInt($("#n_input").val()),
                 hidden_size: n_hidden_array,
-                output_size: $("#n_output").val(),
+                output_size: parseInt($("#n_output").val()),
+                seqLength: parseInt($("#seq_length").val()),
+                optimizer: $("#optimizer").val()
             });
-            console.log(model);
         }
     );
 

@@ -921,7 +921,7 @@ async function firstLearn(){
 }
 
 function getDataSet({
-    datasetSize, dim=1, flatten=true, seq_len=1, outputSize=2,
+    datasetSize, dim=1, flatten=true, halfSeqLen=1, outputSize=2,
     hiddenSize=8, noise=0, make2d=false
 }){
     
@@ -929,7 +929,7 @@ function getDataSet({
         datasetSize: datasetSize,
         dim: dim,
         flatten: true,
-        seq_len: seq_len,
+        halfSeqLen: halfSeqLen,
         outputLength: outputSize,
         noise: noise
     });
@@ -951,10 +951,10 @@ function getDataSet({
 
     for(dat of ds){
         if (make2d){
-            x.push(Array2D.new([2 * seq_len, dim], dat.input));
+            x.push(Array2D.new([2 * halfSeqLen, dim], dat.input));
             labels.push(Array1D.new(dat.output));
-            h.push(Array2D.zeros([2 * seq_len, hiddenSize]));
-            c.push(Array2D.zeros([2 * seq_len, hiddenSize]));
+            h.push(Array2D.zeros([2 * halfSeqLen, hiddenSize]));
+            c.push(Array2D.zeros([2 * halfSeqLen, hiddenSize]));
         }else{
             x.push(Array1D.new(dat.input));
             labels.push(Array1D.new(dat.output));
@@ -1277,7 +1277,7 @@ async function demoFFN1D(printInfo=false){
     let [ds, xProvider, hProvider, cProvider, lProvider] = getDataSet({
         datasetSize: 10 * batchSize,
         dim: 1,
-        seq_len: seqLen / 2,
+        halfSeqLen: seqLen / 2,
         outputSize: outputSize,
         noise: noise
     })
@@ -1349,7 +1349,7 @@ async function demoLSTM(printInfo=false){
     let [ds, xProvider, hProvider, cProvider, lProvider] = getDataSet({
         datasetSize: 10 * batchSize,
         dim: 1,
-        seq_len: seqLen / 2,
+        halfSeqLen: seqLen / 2,
         outputSize: outputSize,
         noise: noise
     })
@@ -1423,7 +1423,8 @@ async function demoLSTMRNN(){
 
     // await firstLearn();
 
-    let batchSize = 64;
+    let batchSize = 8;
+    let datasetSize = 640;
     let hiddenSize = 8;
     let outputSize = 1;
     let learningRate = 0.2;
@@ -1434,9 +1435,10 @@ async function demoLSTMRNN(){
     let [ds, xProvider, hProvider, cProvider, lProvider] = getDataSet({
         datasetSize: 10 * batchSize,
         dim: 1,
-        seq_len: seqLen / 2,
+        halfSeqLen: seqLen / 2,
         outputSize: outputSize,
-        noise: noise
+        noise: noise,
+        datasetSize: datasetSize
     })
 
     const rnn = new RNN({
@@ -1456,9 +1458,18 @@ async function demoLSTMRNNShared({printInfo=false}){
     const session = new Session(graph, math);
 
     // await firstLearn();
+    /*
+    let batchSize = 16;
+    let hiddenSize = 5;
+    let outputSize = 1;
+    let learningRate = 0.1;
+    let momentum = 0.9;
+    let seqLength = 4;
+    let noise = 0.4;
+    */
 
-    let batchSize = 64;
-    let hiddenSize = 32;
+    let batchSize = 8;
+    let hiddenSize = 64;
     let outputSize = 1;
     let learningRate = 0.1;
     let momentum = 0.9;
@@ -1468,7 +1479,7 @@ async function demoLSTMRNNShared({printInfo=false}){
     let [ds, xProvider, hProvider, cProvider, lProvider] = getDataSet({
         datasetSize: 10 * batchSize,
         dim: 1,
-        seq_len: seqLength / 2,
+        halfSeqLen: seqLength / 2,
         outputSize: outputSize,
         noise: noise,
         make2d: true
@@ -1606,7 +1617,7 @@ function slightlyModifiedTestExample(printInfo=false){
     let [ds, inputProvider, , , labelProvider] = getDataSet({
         datasetSize: datasetSize,
         dim: 1,
-        seq_len: seqLen / 2,
+        halfSeqLen: seqLen / 2,
         outputSize: labelShape,
         noise: noise 
     });

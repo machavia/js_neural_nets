@@ -1,9 +1,23 @@
-deepTrain = deepmodels.deepTrain;
-getDeepModel = deepmodels.getDeepModel;
-dsToDeepDS = deepmodels.dsToDeepDS;
-FFN1D = deepmodels.FFN1D;
-RNNShared = deepmodels.RNNShared;
-LSTMCell = deepmodels.LSTMCell;
+if(typeof(require) === 'function'){
+
+    const {
+        deepTrain,
+        getDeepModel,
+        dsToDeepDS,
+        FFN1D,
+        RNNShared,
+        LSTMCell
+    } = require('./deepmodels')
+
+}else{
+
+    deepTrain = deepmodels.deepTrain;
+    getDeepModel = deepmodels.getDeepModel;
+    dsToDeepDS = deepmodels.dsToDeepDS;
+    FFN1D = deepmodels.FFN1D;
+    RNNShared = deepmodels.RNNShared;
+    LSTMCell = deepmodels.LSTMCell;
+}
 
 // Start of module boilerplate, insures that code is useable both
 // on server side and client side
@@ -23,11 +37,11 @@ function getRandSequence(seq_len=1000, vocab_size=6, noise=0, dim=1){
     return(seq)
 }
 
-function getPalindrome(vocab_size=10, seq_len=0, noise=0, dim=1){
-    if(seq_len == 0){
-        seq_len = Math.round(Math.random() * (5 - 1)) + 1;
+function getPalindrome(vocab_size=10, halfSeqLen=0, noise=0, dim=1){
+    if(halfSeqLen == 0){
+        halfSeqLen = Math.round(Math.random() * (5 - 1)) + 1;
     }
-    const first_half = getRandSequence(seq_len, vocab_size, noise, dim);
+    const first_half = getRandSequence(halfSeqLen, vocab_size, noise, dim);
     let i = first_half.length;
     let second_half = []
     while(i--){ second_half.push(first_half[i]) };
@@ -35,12 +49,13 @@ function getPalindrome(vocab_size=10, seq_len=0, noise=0, dim=1){
     return(seq);
 }
 
-function getNonPalindrome(vocab_size=10, seq_len=0, noise=0, dim=1){
-    if(seq_len == 0){
-        seq_len = Math.round(Math.random() * (5 - 1)) + 1;
+function getNonPalindrome(vocab_size=10, halfSeqLen=0, noise=0, dim=1){
+    if(halfSeqLen == 0){
+        halfSeqLen = Math.round(Math.random() * (5 - 1)) + 1;
     }
-    const first_half = getRandSequence(seq_len, vocab_size, noise, dim);
-    let second_half = getRandSequence(seq_len, vocab_size, noise, dim);
+    const first_half = getRandSequence(halfSeqLen, vocab_size, noise, dim);
+    let second_half = getRandSequence(halfSeqLen, vocab_size, noise, dim);
+
     let same = true;
     for(let i = 0; i < first_half.length; i++){
         for(let j = 0; j < first_half[i].length; j++){
@@ -53,7 +68,7 @@ function getNonPalindrome(vocab_size=10, seq_len=0, noise=0, dim=1){
         }
     }
     if(same){
-        ref_pos = Math.floor(Math.random() * seq_len);
+        ref_pos = Math.floor(Math.random() * halfSeqLen);
         change_pos = second_half.length - (ref_pos + 1);
         let feat = Math.floor(Math.random() * second_half[0].length);
         while(
@@ -213,16 +228,17 @@ function reassort({dim=null, seq=null}){
 }
 
 function getPalindromeDataset({
-    datasetSize=1000, flatten=true, seq_len=1, vocab_size=2,
+    datasetSize=1000, flatten=true, halfSeqLen=1, vocab_size=2,
     noise=0, dim=1, outputLength=1
 }){
+
     let trainSet = []
     for(let i = 0; i < datasetSize / 2; i++){
         let pal = getPalindrome(
-            vocab_size=vocab_size, seq_len=seq_len, noise=noise, dim=dim
+            vocab_size=vocab_size, halfSeqLen=halfSeqLen, noise=noise, dim=dim
         );
         let non_pal = getNonPalindrome(
-            vocab_size=vocab_size, seq_len=seq_len, noise=noise, dim=dim
+            vocab_size=vocab_size, halfSeqLen=halfSeqLen, noise=noise, dim=dim
         );
         if(flatten){
             pal = [].concat(...pal);
@@ -270,12 +286,24 @@ function getCheckerDataset({datasetSize=1000}){
 
 }
 
-function learnModel({
+async function learnModel({
     model_type='ffn_synaptic', hidden_size=[1],
     rate=0.2, iterations=100, error=0.005, train_set_size=1000,
     trainSet=null, input_size=1, output_size=1, momentum=0.9,
-    batchSize=64, seqLength=null
+    batchSize=64, seqLength=null, optimizer=null
 }){
+
+    console.assert(typeof(rate) === 'number');
+    console.assert(typeof(iterations) === 'number');
+    console.assert(typeof(error) === 'number');
+    console.assert(typeof(train_set_size) === 'number');
+    console.assert(typeof(input_size) === 'number');
+    console.assert(typeof(output_size) === 'number');
+    console.assert(typeof(momentum) === 'number');
+    console.assert(typeof(batchSize) === 'number');
+    console.assert(typeof(seqLength) === 'number');
+
+    let start = new Date().getTime(); // in millis
 
     const Architect = synaptic.Architect;
     const Layer = synaptic.Layer;
@@ -284,12 +312,14 @@ function learnModel({
     let model;
 
     let getDeep = (x) => {
-        return(deepmodels.getDeepModel({
+        let model = getDeepModel({
+            modelType: x,
             nPredictions: output_size,
-            hiddenSize: hidden_size,
+            hiddenSize: hidden_size[0],
             inputSize: input_size,
             seqLength: seqLength
-        }));
+        });
+        return(model);
     }
 
     switch(model_type){
@@ -329,6 +359,8 @@ function learnModel({
         case 'ffn_deeplearn':
             model = getDeep('FFN1D');
             break;
+        default:
+            console.log('Error no such model option: ', model_type);
     }
 
     if(model_type.match('.*_synaptic')){
@@ -358,16 +390,37 @@ function learnModel({
         );
     }else if(model_type.match('.*_deeplearn')){
 
-        deepTrain({
+        let dlDS = dsToDeepDS({
+            ds: trainSet,
+            dim: input_size,
+            flatten: true,
+            seqLen: seqLength,
+            outputSize: output_size,
+            hiddenSize: hidden_size[0],
+            make2d: true
+        });
+
+        await deepTrain({
             model: model,
             printInfo: false,
-            dsProviders: trainSet,
+            dsProviders: dlDS,
             batchSize: batchSize,
             learningRate: rate,
-            momentum: momentum
+            momentum: momentum,
+            iterations: iterations,
+            optimizer: optimizer
         });
 
     }
+
+    let end = new Date().getTime(); // in millis
+    console.log(
+        ''.concat(...[
+            'time for learn: ', String(((end - start) / 1000)),
+            's'
+        ])
+    );
+
 
     return(model);
 }
@@ -502,7 +555,6 @@ var debug = {trainSet: null, testSet: null, model: null}
 // END of export boiler plate
 exports.getPalindromeDataset = getPalindromeDataset;
 exports.drawSequence = drawSequence;
-exports.getPalindromeDataset = getPalindromeDataset;
 exports.getFFNBrain = getFFNBrain;
 exports.getLstmBrain = getLstmBrain;
 exports.learnModel = learnModel;

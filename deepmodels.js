@@ -1,3 +1,61 @@
+if(typeof(require) === 'function'){
+
+    const {
+        ENV,
+        AdagradOptimizer,
+        AdamOptimizer,
+        AdamaxOptimizer,
+        Array1D,
+        Array2D,
+        Array3D,
+        CostReduction,
+        FeedEntry,
+        Graph,
+        MomentumOptimizer,
+        RMSPropOptimizer,
+        Scalar,
+        Session,
+        SGDOptimizer,
+        Tensor,
+        NDArray,
+        NDArrayMath,
+        InCPUMemoryShuffledInputProviderBuilder,
+        InGPUMemoryShuffledInputProviderBuilder
+    } = require('./node_modules/deeplearn/dist/deeplearn')
+
+    const {
+        Initializer, VarianceScalingInitializer, ZerosInitializer,
+        NDArrayInitializer
+    } = require('./node_modules/deeplearn/dist/deeplearn');
+
+}else{
+
+    ENV = deeplearn.ENV;
+    AdagradOptimizer = deeplearn.AdagradOptimizer;
+    AdamOptimizer = deeplearn.AdamOptimizer;
+    AdamaxOptimizer = deeplearn.AdamaxOptimizer;
+    Array1D = deeplearn.Array1D;
+    Array2D = deeplearn.Array2D;
+    Array3D = deeplearn.Array3D;
+    CostReduction = deeplearn.CostReduction;
+    FeedEntry = deeplearn.FeedEntry;
+    Graph = deeplearn.Graph;
+    MomentumOptimizer = deeplearn.MomentumOptimizer;
+    RMSPropOptimizer = deeplearn.RMSPropOptimizer;
+    Scalar = deeplearn.Scalar;
+    Session = deeplearn.Session;
+    SGDOptimizer = deeplearn.SGDOptimizer;
+    Tensor = deeplearn.Tensor;
+    NDArray = deeplearn.NDArray;
+    NDArrayMath = deeplearn.NDArrayMath;
+    InCPUMemoryShuffledInputProviderBuilder = deeplearn.InCPUMemoryShuffledInputProviderBuilder;
+    InGPUMemoryShuffledInputProviderBuilder = deeplearn.InGPUMemoryShuffledInputProviderBuilder;
+    Initializer = deeplearn.Initializer;
+    VarianceScalingInitializer = deeplearn.VarianceScalingInitializer;
+    ZerosInitializer = deeplearn.ZerosInitializer;
+    NDArrayInitializer = deeplearn.NDArrayInitializer;
+}
+
 // Start of module boilerplate, insures that code is useable both
 // on server side and client side
 (function(exports){
@@ -488,8 +546,8 @@ class RNNShared{
 }
 
 function dsToDeepDS({
-    ds, dim=1, flatten=true, seq_len=1, outputSize=2,
-    hiddenSize=8, noise=0, make2d=false
+    ds, dim=1, flatten=true, seqLen=1, outputSize=2,
+    hiddenSize=8, make2d=false
 }){
     
     let [x, h, c, labels] = [[], [], [], []];
@@ -509,10 +567,10 @@ function dsToDeepDS({
 
     for(dat of ds){
         if (make2d){
-            x.push(Array2D.new([2 * seq_len, dim], dat.input));
+            x.push(Array2D.new([seqLen, dim], dat.input));
             labels.push(Array1D.new(dat.output));
-            h.push(Array2D.zeros([2 * seq_len, hiddenSize]));
-            c.push(Array2D.zeros([2 * seq_len, hiddenSize]));
+            h.push(Array2D.zeros([seqLen, hiddenSize]));
+            c.push(Array2D.zeros([seqLen, hiddenSize]));
         }else{
             x.push(Array1D.new(dat.input));
             labels.push(Array1D.new(dat.output));
@@ -535,30 +593,54 @@ async function deepTrain({
     model=null,
     printInfo=false,
     dsProviders=null,
-    batchSize = 64,
-    learningRate = 0.1,
-    momentum = 0.9,
+    batchSize=64,
+    learningRate=0.1,
+    momentum=0.9,
+    iterations=100,
+    optimizer='momemtum'
 }){
 
+    console.assert(typeof(batchSize) === 'number');
+    console.assert(typeof(learningRate) === 'number');
+    console.assert(typeof(momentum) === 'number');
+    console.assert(typeof(iterations) === 'number');
+
+    [ds, xProvider, hProvider, cProvider, lProvider] = dsProviders;
+
     // await firstLearn();
-    graph = model.graph;
-    session = model.session;
+    let graph = model.graph;
+    let session = model.session;
 
     // Maps tensors to InputProviders.
-    xFeed = {tensor: model.x, data: xProvider};
-    lFeed = {tensor: model.y, data: lProvider};
+    let xFeed = {tensor: model.x, data: xProvider};
+    let lFeed = {tensor: model.y, data: lProvider};
 
-    feedEntries = [xFeed, lFeed];
+    let feedEntries = [xFeed, lFeed];
 
-    x_check = graph.reshape(model.x, model.x.shape);
-    l_check = graph.reshape(model.y, model.y.shape);
+    let x_check = graph.reshape(model.x, model.x.shape);
+    let l_check = graph.reshape(model.y, model.y.shape);
 
-    optimizer = new MomentumOptimizer(learningRate, momentum);
+    switch (optimizer){
+        case 'momentum':
+            optimizer = new MomentumOptimizer(learningRate, momentum);
+            break;
+        case 'SGD':
+            optimizer = new SGDOptimizer(learningRate);
+            break;
+        case 'RMSProp':
+            optimizer = new RMSPropOptimizer(learningRate, momentum);
+            break;
+        case 'Adam':
+            optimizer = new RMSPropOptimizer(learningRate, momentum, 0.999);
+            break;
+        case 'Adagrad':
+            optimizer = new RMSPropOptimizer(learningRate, momentum);
+            break;
+    }
     // optimizer = new RMSPropOptimizer(learningRate, momentum);
     // optimizer = new SGDOptimizer(learningRate);
 
-    NUM_BATCHES = 1000;
-    for (let i = 0; i < NUM_BATCHES; i++) {
+    for (let i = 0; i < iterations; i++) {
         // Train takes a cost tensor to minimize. Trains one batch. Returns the
         // average cost as a Scalar.
         if(printInfo){
@@ -569,7 +651,9 @@ async function deepTrain({
             console.log("p:", p1.dataSync(), "t:", t1.dataSync());
             */
             for(let i = 0; i <= 100; i++){
-                let input = Array1D.new(ds[i].input);
+                let input = model.x.shape.length === 1 ?
+                    Array1D.new(ds[i].input):
+                    Array2D.new(model.x.shape, ds[i].input);
                 let target = ds[i].output; 
                 let pred = session.eval(
                     model.output, [{tensor: model.x, data: input}]
@@ -581,6 +665,8 @@ async function deepTrain({
                 }
             }
         }
+
+        console.log("!!!!!", model.cost, feedEntries, batchSize, optimizer)
         
         const cost = session.train(
             model.cost, feedEntries, batchSize, optimizer, CostReduction.MEAN
@@ -612,7 +698,7 @@ function getDeepModel({
     switch (modelType){
         case 'RNNLSTM':
             model = new RNNShared({
-                graph: graph, session: session, nPredictions: outputSize,
+                graph: graph, session: session, nPredictions: nPredictions,
                 hiddenSize: hiddenSize, inputSize: inputSize,
                 seqLength: seqLength,
                 init_weights: null
@@ -637,6 +723,8 @@ function getDeepModel({
     model.session = session;
     model.graph = graph;
 
+    return(model);
+
 }
 
 
@@ -647,6 +735,7 @@ exports.LSTMCellShared = LSTMCellShared;
 exports.RNNShared = RNNShared;
 exports.dsToDeepDS = dsToDeepDS;
 exports.getDeepModel = getDeepModel;
+exports.deepTrain = deepTrain;
 })(
     typeof exports === 'undefined'?  this['deepmodels']={}: exports
 );
