@@ -408,7 +408,7 @@ async function learnModel({
             learningRate: rate,
             momentum: momentum,
             iterations: iterations,
-            optimizer: optimizer
+            optimizerType: optimizer
         });
 
     }

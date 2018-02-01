@@ -75,7 +75,7 @@
                 \>
 
                 iter: <input
-                    id='iter' type='text' value=100
+                    id='iter' type='text' value=1
                     style="width: 50px"
                 >
 
@@ -106,11 +106,16 @@
                 >
 
                 optimizer: <select id='optimizer'>
+                  <option value="RMSProp">RMSProp</option>
                   <option value="momentum">momentum</option>
                   <option value="SGD">SGD</option>
-                  <option value="RMSProp">RMSProp</option>
                   <option value="Adam">Adam</option>
                   <option value="Adagrad">Adagrad</option>
+                </select> 
+
+                batch_by_batch: <select id='optimizer'>
+                  <option value="1">true</option>
+                  <option value="0">false</option>
                 </select> 
 
             </fieldset>
@@ -138,13 +143,14 @@
     <script src="./bower_components/requirejs/require.js"></script>
     <script src="./bower_components/synaptic/prebuild.js"></script>
     <script src="./synaptic.min.js"></script>
+    <script src="./node_modules/deeplearn/dist/deeplearn.min.js"></script>
 -->
 
 <script src="./bower_components/mnist/dist/mnist.js"></script>
 <script src="./bower_components/brain.js/browser.js"></script>
-<script src="./node_modules/deeplearn/dist/deeplearn.min.js"></script>
 <script src="jquery-3.2.1.min.js"></script>
 <script src="./synaptic.js"></script>
+<script src="./deeplearn.min.js"></script>
 <script src="./deepmodels.js"></script>
 <script src="./utils.js"></script>
 <script src="./neural_poc.js"></script>

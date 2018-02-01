@@ -8,6 +8,8 @@ getFFNSynaptic = utils.getFFNSynaptic;
 speedTest = utils.speedTest;
 testBatch = utils.testBatch;
 debug = utils.debug;
+debugDeep = deepmodels.debug;
+protoSerialize = deepmodels.protoSerialize;
 
 window.onload = function(){
 
@@ -112,7 +114,8 @@ window.onload = function(){
                 hidden_size: n_hidden_array,
                 output_size: parseInt($("#n_output").val()),
                 seqLength: parseInt($("#seq_length").val()),
-                optimizer: $("#optimizer").val()
+                optimizer: $("#optimizer").val(),
+                batchByBatch: Boolean(parseInt($("#batchByBatch").val()))
             });
         }
     );

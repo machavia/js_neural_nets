@@ -17,16 +17,20 @@ if(typeof(require) === 'function'){
         Session,
         SGDOptimizer,
         Tensor,
+        util,
         NDArray,
         NDArrayMath,
         InCPUMemoryShuffledInputProviderBuilder,
         InGPUMemoryShuffledInputProviderBuilder
-    } = require('./node_modules/deeplearn/dist/deeplearn')
+    } = require('./deeplearn')
+
+    // require('./node_modules/deeplearn/dist/deeplearn')
 
     const {
         Initializer, VarianceScalingInitializer, ZerosInitializer,
         NDArrayInitializer
-    } = require('./node_modules/deeplearn/dist/deeplearn');
+    } = require('./deeplearn')
+    // require('./node_modules/deeplearn/dist/deeplearn');
 
 }else{
 
@@ -46,6 +50,7 @@ if(typeof(require) === 'function'){
     Session = deeplearn.Session;
     SGDOptimizer = deeplearn.SGDOptimizer;
     Tensor = deeplearn.Tensor;
+    util = deeplearn.util;
     NDArray = deeplearn.NDArray;
     NDArrayMath = deeplearn.NDArrayMath;
     InCPUMemoryShuffledInputProviderBuilder = deeplearn.InCPUMemoryShuffledInputProviderBuilder;
@@ -54,6 +59,7 @@ if(typeof(require) === 'function'){
     VarianceScalingInitializer = deeplearn.VarianceScalingInitializer;
     ZerosInitializer = deeplearn.ZerosInitializer;
     NDArrayInitializer = deeplearn.NDArrayInitializer;
+
 }
 
 // Start of module boilerplate, insures that code is useable both
@@ -326,6 +332,101 @@ class LSTMCell{
 }
 
 
+/** TODO delete
+* Stolen from session.optimizer, manually transpiled to JS
+* Trains a batch.
+* Returns a reduced cost if the costReduction parameter is set.
+* When using a `NDArrayMath` object in safe mode this must be used in a
+* math.scope().
+* @param costTensor A tensor representing the cost to optimize. Should be a
+* scalar.
+* @param feedEntries Feed entries for this train run. Provides inputs.
+* @param batchSize Batch size for this train loop.
+* @param optimizer An optimizer to perform weight updates.
+* @param costReduction An option to allow the user to get a summed, averaged,
+* or no cost back.
+* @return The reduced cost, if cost reduction is not NONE. The user is
+* responsible for disposing the cost NDArray between train loops.
+*/
+var FeedDictionary = (function () {
+    function FeedDictionary(feedEntries) {
+        var _this = this;
+        this.dict = {};
+        if (feedEntries) {
+            feedEntries.forEach(function (entry) { return _this.dict[entry.tensor.id] = entry; });
+        }
+    }
+    return FeedDictionary;
+}());
+function trainModified(
+    costTensor, feedEntries, batchSize,
+    optimizer, costReduction = CostReduction.NONE
+){
+    util.assert(
+        util.isScalarShape(costTensor.shape),
+        'Cost tensor for training must be a scalar value.');
+
+    if (this.prevBatchSize !== batchSize) {
+        this.prevBatchSize = batchSize;
+        if (this.batchSizeScalar != null) {
+            this.batchSizeScalar.dispose();
+        }
+        this.batchSizeScalar = this.math.keep(Scalar.new(batchSize));
+    }
+
+    const feed = new FeedDictionary(feedEntries);
+    session_util.throwIfFeedDictionaryContainsNDArrays(feed);
+
+    const runtime = this.getOrCreateRuntime([costTensor], feed);
+    const inferenceOperations = runtime.operations;
+    const backPropOperations = runtime.operations.slice().reverse();
+    const activations = this.activationArrayMap;
+    const gradients = this.gradientArrayMap;
+    gradients.nullify(costTensor);
+    gradients.add(costTensor, this.oneScalar);
+
+    session_util.addPersistentArraysToTensorArrayMap(
+        runtime.nodes, activations);
+
+    optimizer.beforeBatch(
+        this.math, batchSize, runtime, activations, gradients);
+
+    return this.math.scope(() => {
+      let cost = Scalar.new(0);
+
+      for (let i = 0; i < batchSize; ++i) {
+        session_util.disposeAndInitializeOperationOutputs(
+            runtime.nodes, activations);
+        session_util.disposeAndInitializeOperationInputGradients(
+            runtime.nodes, gradients);
+        session_util.disposeTransientOperationArrays(
+            runtime.operations, activations, gradients);
+
+        session_util.loadInputsFromFeedDictionaryToTensorArrayMap(
+            feed, activations, this.math);
+
+        inferenceOperations.forEach(
+            op => op.feedForward(this.math, activations));
+        backPropOperations.forEach(
+            op => op.backProp(this.math, activations, gradients));
+
+        optimizer.afterExample(this.math, runtime, activations, gradients);
+
+        session_util.releaseFeedDictionaryInputsFromTensorArrayMap(
+            feed, activations, this.math);
+
+        cost = this.updateCostForExample(
+            cost, activations.get(costTensor),
+            costReduction);
+      }
+
+      optimizer.afterBatch(
+          this.math, batchSize, runtime, activations, gradients);
+
+      return this.updateCostForBatch(cost, costReduction);
+    });
+}
+
 class LSTMCellShared{
     constructor({
         graph, input_size=2, hidden_size=3, nPredictions=1,
@@ -589,38 +690,29 @@ function dsToDeepDS({
     return([ds, xProvider, hProvider, cProvider, lProvider]);
 }
 
-async function deepTrain({
-    model=null,
-    printInfo=false,
-    dsProviders=null,
-    batchSize=64,
-    learningRate=0.1,
-    momentum=0.9,
-    iterations=100,
-    optimizer='momemtum'
-}){
-
-    console.assert(typeof(batchSize) === 'number');
-    console.assert(typeof(learningRate) === 'number');
-    console.assert(typeof(momentum) === 'number');
-    console.assert(typeof(iterations) === 'number');
-
-    [ds, xProvider, hProvider, cProvider, lProvider] = dsProviders;
-
-    // await firstLearn();
-    let graph = model.graph;
-    let session = model.session;
+function prepareFeed(model){
 
     // Maps tensors to InputProviders.
-    let xFeed = {tensor: model.x, data: xProvider};
-    let lFeed = {tensor: model.y, data: lProvider};
+    xFeed = {tensor: model.x, data: xProvider};
+    lFeed = {tensor: model.y, data: lProvider};
 
-    let feedEntries = [xFeed, lFeed];
+    feedEntries = [xFeed, lFeed];
 
-    let x_check = graph.reshape(model.x, model.x.shape);
-    let l_check = graph.reshape(model.y, model.y.shape);
+    return(feedEntries);
 
-    switch (optimizer){
+}
+
+function prepareGraphSessOpt(model, optimizerType, learningRate, momentum){
+
+    console.assert(model !== null);
+
+    graph = model.graph;
+    session = model.session;
+
+    x_check = graph.reshape(model.x, model.x.shape);
+    l_check = graph.reshape(model.y, model.y.shape);
+
+    switch (optimizerType){
         case 'momentum':
             optimizer = new MomentumOptimizer(learningRate, momentum);
             break;
@@ -631,16 +723,68 @@ async function deepTrain({
             optimizer = new RMSPropOptimizer(learningRate, momentum);
             break;
         case 'Adam':
-            optimizer = new RMSPropOptimizer(learningRate, momentum, 0.999);
+            optimizer = new AdamOptimizer(learningRate, momentum, 0.999);
             break;
         case 'Adagrad':
-            optimizer = new RMSPropOptimizer(learningRate, momentum);
+            optimizer = new AdagradOptimizer(learningRate, momentum);
             break;
     }
+
+    return([graph, session, x_check, l_check])
+}
+
+async function deepTrain({
+    model=null,
+    modelParams=null,
+    printInfo=false,
+    dsProviders=null,
+    batchSize=64,
+    learningRate=0.1,
+    momentum=0.9,
+    iterations=100,
+    optimizerType='momemtum',
+    batchByBatch=false
+}){
+
+    console.assert(typeof(batchSize) === 'number');
+    console.assert(typeof(learningRate) === 'number');
+    console.assert(typeof(momentum) === 'number');
+    console.assert(typeof(iterations) === 'number');
+
+    [ds, xProvider, hProvider, cProvider, lProvider] = dsProviders;
+
+    // await firstLearn();
+    let [
+        graph, session, xFeed, lFeed, feedEntries, x_check, l_check
+    ] = [[], [], [], [], null, [], []]
+
+    // inject session with our modified version of train
+    // maybe using bind to add the session context to the function ?
+    // Ok rather than craping our pants here we will just modify the original
+    // code...
+
+    if (! batchByBatch){
+        [graph, session, x_check, l_check] =
+            prepareGraphSessOpt(
+                model, optimizerType, momentum, learningRate, momentum)
+    }
+
     // optimizer = new RMSPropOptimizer(learningRate, momentum);
     // optimizer = new SGDOptimizer(learningRate);
 
     for (let i = 0; i < iterations; i++) {
+        if (batchByBatch){
+            [graph, session, x_check, l_check] =
+                prepareGraphSessOpt(
+                    model, modelType, learningRate, momentum, learningRate,
+                    momentum
+                )
+        }
+
+        if (feedEntries === null){
+            feedEntries = prepareFeed(model);
+        }
+
         // Train takes a cost tensor to minimize. Trains one batch. Returns the
         // average cost as a Scalar.
         if(printInfo){
@@ -666,9 +810,7 @@ async function deepTrain({
             }
         }
 
-        console.log("!!!!!", model.cost, feedEntries, batchSize, optimizer)
-        
-        const cost = session.train(
+        const cost = session.trainMod(
             model.cost, feedEntries, batchSize, optimizer, CostReduction.MEAN
         );
         try {
@@ -678,6 +820,15 @@ async function deepTrain({
         }
         console.log('last average cost (' + i + '): ' + costVal);
     }
+
+
+    console.log("!!!!!", model.cost, feedEntries, batchSize, optimizer)
+    console.log(model, optimizer)
+    console.log(optimizer.variableGradients)
+    console.log(JSON.stringify(optimizer.variableGradients))
+
+    debug.optimizer = optimizer;
+    debug.session = session;
 
 }
 
@@ -727,6 +878,15 @@ function getDeepModel({
 
 }
 
+function protoSerialize(){
+
+    debug.ids = debug.optimizer.variableNodes.forEach(
+        (node) => {console.log(node.id)});
+
+}
+
+
+var debug = {}
 
 // END of export boiler plate
 exports.FFN1D = FFN1D;
@@ -736,6 +896,8 @@ exports.RNNShared = RNNShared;
 exports.dsToDeepDS = dsToDeepDS;
 exports.getDeepModel = getDeepModel;
 exports.deepTrain = deepTrain;
+exports.debug = debug;
+exports.protoSerialize = protoSerialize;
 })(
     typeof exports === 'undefined'?  this['deepmodels']={}: exports
 );
