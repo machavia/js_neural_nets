@@ -290,7 +290,8 @@ async function learnModel({
     model_type='ffn_synaptic', hidden_size=[1],
     rate=0.2, iterations=100, error=0.005, train_set_size=1000,
     trainSet=null, input_size=1, output_size=1, momentum=0.9,
-    batchSize=64, seqLength=null, optimizer=null
+    batchSize=64, seqLength=null, optimizer=null,
+    modelByBatch=false
 }){
 
     console.assert(typeof(rate) === 'number');
@@ -309,17 +310,22 @@ async function learnModel({
     const Layer = synaptic.Layer;
     const Trainer = synaptic.Trainer;
 
-    let model;
+    let [model, modelParams] = [null, null];
 
     let getDeep = (x) => {
-        let model = getDeepModel({
+        let modelParams = {
             modelType: x,
             nPredictions: output_size,
             hiddenSize: hidden_size[0],
             inputSize: input_size,
             seqLength: seqLength
-        });
-        return(model);
+        };
+        if (modelByBatch){
+            return([modelParams, null])
+        }else{
+            let model = getDeepModel(modelParams);
+            return([null, model]);
+        }
     }
 
     switch(model_type){
@@ -351,13 +357,13 @@ async function learnModel({
             });
             break;
         case 'lstmcell_deeplearn':
-            model = getDeep('LSTM');
+            [modelParams, model] = getDeep('LSTM');
             break;
         case 'lstm_deeplearn':
-            model = getDeep('RNNLSTM');
+            [modelParams, model] = getDeep('RNNLSTM');
             break;
         case 'ffn_deeplearn':
-            model = getDeep('FFN1D');
+            [modelParams, model] = getDeep('FFN1D');
             break;
         default:
             console.log('Error no such model option: ', model_type);
@@ -390,25 +396,43 @@ async function learnModel({
         );
     }else if(model_type.match('.*_deeplearn')){
 
-        let dlDS = dsToDeepDS({
-            ds: trainSet,
-            dim: input_size,
-            flatten: true,
-            seqLen: seqLength,
-            outputSize: output_size,
-            hiddenSize: hidden_size[0],
-            make2d: true
-        });
+        let [dlDS, dsParameters] = [null, null];
 
+        if (modelByBatch){
+            dsParameters = {
+                ds: trainSet,
+                dim: input_size,
+                flatten: true,
+                seqLen: seqLength,
+                outputSize: output_size,
+                hiddenSize: hidden_size[0],
+                make2d: true
+            }
+        }else{
+            dlDS = dsToDeepDS({
+                ds: trainSet,
+                dim: input_size,
+                flatten: true,
+                seqLen: seqLength,
+                outputSize: output_size,
+                hiddenSize: hidden_size[0],
+                make2d: true
+            });
+        }
+    
         await deepTrain({
             model: model,
+            modelParams,
             printInfo: false,
             dsProviders: dlDS,
+            dsParameters: dsParameters,
             batchSize: batchSize,
             learningRate: rate,
             momentum: momentum,
             iterations: iterations,
-            optimizerType: optimizer
+            optimizerType: optimizer,
+            optimizerByBatch: optimizerByBatch,
+            modelByBatch: modelByBatch
         });
 
     }

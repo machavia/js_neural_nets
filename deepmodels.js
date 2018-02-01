@@ -646,16 +646,75 @@ class RNNShared{
     }
 }
 
+class Feeder{
+
+    constructor({
+        ds, dim, seqLen, outputSize, hiddenSize, make2d, batchSize,
+        addState=false
+    }){
+        this.ds = ds;
+        this.dim = dim;
+        this.seqLen = seqLen;
+        this.outputSize = outputSize;
+        this.hiddenSize = hiddenSize;
+        this.make2d = make2d;
+        this.batchSize = batchSize;
+        this.index = 0;
+        this.addState = addState;
+    }
+
+    next(model){
+        
+        let [x, h, c, labels] = [[], [], [], []];
+
+        let labelTensor = [];
+        let costTensor = [];
+        let optimizer = [];
+        let feedEntries = [];
+
+        let shuffledInputProviderBuilder = [];
+        let [xProvider, hProvider, cProvider, lProvider] = []
+        let [xFeed, hFeed, cFeed, lFeed] = []
+
+        for(let curr = 0; curr < this.batchSize; curr++){
+            if (this.index == this.ds.length){this.index = 0;}
+            let dat = this.ds[this.index];
+            if (this.make2d){
+                x.push(Array2D.new([this.seqLen, this.dim], dat.input));
+                labels.push(Array1D.new(dat.output));
+            }else{
+                x.push(Array1D.new(dat.input));
+                labels.push(Array1D.new(dat.output));
+                if(this.addState){
+                    h.push(Array1D.zeros([this.hiddenSize]));
+                    c.push(Array1D.zeros([this.hiddenSize]));
+                }
+            }
+            this.index++;
+        }
+
+        let toGet = this.addState ? [x, h, c, labels] : [x, labels];
+
+        // Shuffles inputs and labels and keeps them mutually in sync.
+        shuffledInputProviderBuilder =
+            new InCPUMemoryShuffledInputProviderBuilder(toGet);
+
+        debug.shuffledInputProvider = shuffledInputProviderBuilder;
+
+        let toReturn = 
+            shuffledInputProviderBuilder.getInputProviders();
+
+        return(toReturn);
+    }
+
+}
+
 function dsToDeepDS({
     ds, dim=1, flatten=true, seqLen=1, outputSize=2,
     hiddenSize=8, make2d=false
 }){
     
     let [x, h, c, labels] = [[], [], [], []];
-
-    math = ENV.math;
-    const graph = new Graph();
-    const session = new Session(graph, math);
 
     let labelTensor = [];
     let costTensor = [];
@@ -690,7 +749,7 @@ function dsToDeepDS({
     return([ds, xProvider, hProvider, cProvider, lProvider]);
 }
 
-function prepareFeed(model){
+function prepareFeed(model, xProvider, lProvider){
 
     // Maps tensors to InputProviders.
     xFeed = {tensor: model.x, data: xProvider};
@@ -738,51 +797,71 @@ async function deepTrain({
     modelParams=null,
     printInfo=false,
     dsProviders=null,
+    dsParameters=null,
     batchSize=64,
     learningRate=0.1,
     momentum=0.9,
     iterations=100,
     optimizerType='momemtum',
-    batchByBatch=false
+    optimizerByBatch=false,
+    modelByBatch=false
 }){
+
+    // Houston we have a memory leak !
 
     console.assert(typeof(batchSize) === 'number');
     console.assert(typeof(learningRate) === 'number');
     console.assert(typeof(momentum) === 'number');
     console.assert(typeof(iterations) === 'number');
 
-    [ds, xProvider, hProvider, cProvider, lProvider] = dsProviders;
+    debug.ds = dsParameters;
 
     // await firstLearn();
     let [
-        graph, session, xFeed, lFeed, feedEntries, x_check, l_check
-    ] = [[], [], [], [], null, [], []]
+        feeder, graph, session, xFeed, lFeed, feedEntries, x_check, l_check
+    ] = [null, null, null, null, null, null, null, null]
+
+    let [ds, xProvider, hProvider, cProvider, lProvider] = [
+        null, null, null, null, null
+    ]
+
+    if (modelByBatch){
+        dsParameters.batchSize = batchSize;
+        feeder = new Feeder(dsParameters);
+    }else{
+        [ds, xProvider, hProvider, cProvider, lProvider] = dsProviders;
+    }
+
+    debug.xProvider =  xProvider;
 
     // inject session with our modified version of train
     // maybe using bind to add the session context to the function ?
     // Ok rather than craping our pants here we will just modify the original
     // code...
 
-    if (! batchByBatch){
-        [graph, session, x_check, l_check] =
-            prepareGraphSessOpt(
-                model, optimizerType, momentum, learningRate, momentum)
-    }
 
     // optimizer = new RMSPropOptimizer(learningRate, momentum);
     // optimizer = new SGDOptimizer(learningRate);
-
     for (let i = 0; i < iterations; i++) {
-        if (batchByBatch){
+
+        // we can chose to keep the same model / optimizer accross batches
+        // or
+        // we can chose to have a new model / optimizer for each batch
+        if(modelByBatch){
+            model = getDeepModel(modelParams);
+            [xProvider, lProvider] = feeder.next();
+            debug.xProvider = xProvider;
+        }
+
+        if (graph === null){
             [graph, session, x_check, l_check] =
                 prepareGraphSessOpt(
-                    model, modelType, learningRate, momentum, learningRate,
-                    momentum
-                )
+                    model, optimizerType, learningRate, momentum, learningRate,
+                    momentum)
         }
 
         if (feedEntries === null){
-            feedEntries = prepareFeed(model);
+            feedEntries = prepareFeed(model, xProvider, lProvider);
         }
 
         // Train takes a cost tensor to minimize. Trains one batch. Returns the
@@ -811,14 +890,20 @@ async function deepTrain({
         }
 
         const cost = session.trainMod(
-            model.cost, feedEntries, batchSize, optimizer, CostReduction.MEAN
-        );
+            model.cost, feedEntries, batchSize, optimizer, CostReduction.MEAN);
+
         try {
             costVal = await cost.val();
         } catch(e){
             console.log("Error at await", e);
         }
         console.log('last average cost (' + i + '): ' + costVal);
+
+        if (optimizerByBatch){
+            feedEntries = null;
+            session.dispose();  // does not solve the mem leak
+            graph = null;
+        }
     }
 
 

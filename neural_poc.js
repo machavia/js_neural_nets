@@ -115,7 +115,8 @@ window.onload = function(){
                 output_size: parseInt($("#n_output").val()),
                 seqLength: parseInt($("#seq_length").val()),
                 optimizer: $("#optimizer").val(),
-                batchByBatch: Boolean(parseInt($("#batchByBatch").val()))
+                optimizerByBatch: Boolean(parseInt($("#optimizerByBatch").val())),
+                modelByBatch: Boolean(parseInt($("#modelByBatch").val()))
             });
         }
     );
