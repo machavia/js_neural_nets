@@ -398,7 +398,7 @@ async function learnModel({
 
         let [dlDS, dsParameters] = [null, null];
 
-        if (modelByBatch){
+        // if (modelByBatch){
             dsParameters = {
                 ds: trainSet,
                 dim: input_size,
@@ -408,7 +408,7 @@ async function learnModel({
                 hiddenSize: hidden_size[0],
                 make2d: true
             }
-        }else{
+        // }else{
             dlDS = dsToDeepDS({
                 ds: trainSet,
                 dim: input_size,
@@ -418,7 +418,7 @@ async function learnModel({
                 hiddenSize: hidden_size[0],
                 make2d: true
             });
-        }
+        // }
     
         await deepTrain({
             model: model,

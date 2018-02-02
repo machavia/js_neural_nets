@@ -10,6 +10,7 @@ if(typeof(require) === 'function'){
         Array3D,
         CostReduction,
         FeedEntry,
+        GPGPUContext,
         Graph,
         MomentumOptimizer,
         RMSPropOptimizer,
@@ -43,6 +44,7 @@ if(typeof(require) === 'function'){
     Array3D = deeplearn.Array3D;
     CostReduction = deeplearn.CostReduction;
     FeedEntry = deeplearn.FeedEntry;
+    GPGPUContext = deeplearn.GPGPUContext;
     Graph = deeplearn.Graph;
     MomentumOptimizer = deeplearn.MomentumOptimizer;
     RMSPropOptimizer = deeplearn.RMSPropOptimizer;
@@ -54,6 +56,7 @@ if(typeof(require) === 'function'){
     NDArray = deeplearn.NDArray;
     NDArrayMath = deeplearn.NDArrayMath;
     InCPUMemoryShuffledInputProviderBuilder = deeplearn.InCPUMemoryShuffledInputProviderBuilder;
+    InCPUMemoryShuffledInputProviderBuilderExtended = deeplearn.InCPUMemoryShuffledInputProviderBuilderExtended;
     InGPUMemoryShuffledInputProviderBuilder = deeplearn.InGPUMemoryShuffledInputProviderBuilder;
     Initializer = deeplearn.Initializer;
     VarianceScalingInitializer = deeplearn.VarianceScalingInitializer;
@@ -650,7 +653,7 @@ class Feeder{
 
     constructor({
         ds, dim, seqLen, outputSize, hiddenSize, make2d, batchSize,
-        addState=false
+        addState=false, math=null
     }){
         this.ds = ds;
         this.dim = dim;
@@ -661,50 +664,79 @@ class Feeder{
         this.batchSize = batchSize;
         this.index = 0;
         this.addState = addState;
+        this.math = math;
+        this.allocated = [];
     }
 
-    next(model){
-        
-        let [x, h, c, labels] = [[], [], [], []];
+    next(){
 
-        let labelTensor = [];
-        let costTensor = [];
-        let optimizer = [];
-        let feedEntries = [];
+        // return(this.math.scope(() => {
 
-        let shuffledInputProviderBuilder = [];
-        let [xProvider, hProvider, cProvider, lProvider] = []
-        let [xFeed, hFeed, cFeed, lFeed] = []
+            let [x, h, c, labels] = [[], [], [], []];
 
-        for(let curr = 0; curr < this.batchSize; curr++){
-            if (this.index == this.ds.length){this.index = 0;}
-            let dat = this.ds[this.index];
-            if (this.make2d){
-                x.push(Array2D.new([this.seqLen, this.dim], dat.input));
-                labels.push(Array1D.new(dat.output));
-            }else{
-                x.push(Array1D.new(dat.input));
-                labels.push(Array1D.new(dat.output));
-                if(this.addState){
-                    h.push(Array1D.zeros([this.hiddenSize]));
-                    c.push(Array1D.zeros([this.hiddenSize]));
+            let labelTensor = [];
+            let costTensor = [];
+            let optimizer = [];
+            let feedEntries = [];
+
+            let shuffledInputProviderBuilder = [];
+            let [xProvider, hProvider, cProvider, lProvider] = []
+            let [xFeed, hFeed, cFeed, lFeed] = []
+
+            for(let curr = 0; curr < this.batchSize; curr++){
+                if (this.index == this.ds.length){this.index = 0;}
+                let dat = this.ds[this.index];
+
+                let [xItem, lItem, hItem, cItem] = [null, null, null, null]
+
+                if (this.make2d){
+
+                    xItem = Array2D.new([this.seqLen, this.dim], dat.input);
+                    lItem = Array1D.new(dat.output);
+
+                }else{
+
+                    xItem = Array1D.new(dat.input);
+                    lItem = Array1D.new(dat.output);
+
+                    if(this.addState){
+                        hItem = Array1D.zeros([this.hiddenSize]);
+                        cItem = Array1D.zeros([this.hiddenSize]);
+                    }
                 }
+
+                this.allocated.push(xItem);
+                this.allocated.push(lItem);
+                x.push(xItem);
+                labels.push(lItem);
+
+                if (this.addState){
+                    this.allocated.push(hItem);
+                    this.allocated.push(cItem);
+                    h.push(hItem);
+                    c.push(cItem);
+                }
+
+                this.index++;
             }
-            this.index++;
-        }
 
-        let toGet = this.addState ? [x, h, c, labels] : [x, labels];
+            let toGet = this.addState ? [x, h, c, labels] : [x, labels];
 
-        // Shuffles inputs and labels and keeps them mutually in sync.
-        shuffledInputProviderBuilder =
-            new InCPUMemoryShuffledInputProviderBuilder(toGet);
+            console.log(InCPUMemoryShuffledInputProviderBuilderExtended);
 
-        debug.shuffledInputProvider = shuffledInputProviderBuilder;
+            // Shuffles inputs and labels and keeps them mutually in sync.
+            shuffledInputProviderBuilder =
+                new InCPUMemoryShuffledInputProviderBuilderExtended(toGet);
 
-        let toReturn = 
-            shuffledInputProviderBuilder.getInputProviders();
+            debug.shuffledInputProvider = shuffledInputProviderBuilder;
 
-        return(toReturn);
+            let toReturn = 
+                shuffledInputProviderBuilder.getInputProviders();
+
+            // return(toReturn);
+
+            return(toReturn);
+        // }))
     }
 
 }
@@ -739,9 +771,13 @@ function dsToDeepDS({
         }
     }
 
+    console.log(InCPUMemoryShuffledInputProviderBuilderExtended);
+
     // Shuffles inputs and labels and keeps them mutually in sync.
     shuffledInputProviderBuilder =
-        new InCPUMemoryShuffledInputProviderBuilder([x, h, c, labels]);
+        new InCPUMemoryShuffledInputProviderBuilderExtended([x, h, c, labels]);
+
+    debug.shuffledInputProvider = shuffledInputProviderBuilder;
 
     [xProvider, hProvider, cProvider, lProvider] =
         shuffledInputProviderBuilder.getInputProviders();
@@ -751,14 +787,40 @@ function dsToDeepDS({
 
 function prepareFeed(model, xProvider, lProvider){
 
-    // Maps tensors to InputProviders.
-    xFeed = {tensor: model.x, data: xProvider};
-    lFeed = {tensor: model.y, data: lProvider};
+    // return model.math.scope(() => {
+        // Maps tensors to InputProviders.
+        xFeed = {tensor: model.x, data: xProvider};
+        lFeed = {tensor: model.y, data: lProvider};
 
-    feedEntries = [xFeed, lFeed];
+        feedEntries = [xFeed, lFeed];
 
-    return(feedEntries);
+        return(feedEntries);
+    // });
+}
 
+function getOptimizer(optimizerType, learningRate, momentum){
+
+    let optimizer = null;
+
+    switch (optimizerType){
+        case 'momentum':
+            optimizer = new MomentumOptimizer(learningRate, momentum);
+            break;
+        case 'SGD':
+            optimizer = new SGDOptimizer(learningRate);
+            break;
+        case 'RMSProp':
+            optimizer = new RMSPropOptimizer(learningRate, momentum);
+            break;
+        case 'Adam':
+            optimizer = new AdamOptimizer(learningRate, momentum, 0.999);
+            break;
+        case 'Adagrad':
+            optimizer = new AdagradOptimizer(learningRate, momentum);
+            break;
+    }
+
+    return(optimizer)
 }
 
 function prepareGraphSessOpt(model, optimizerType, learningRate, momentum){
@@ -789,7 +851,7 @@ function prepareGraphSessOpt(model, optimizerType, learningRate, momentum){
             break;
     }
 
-    return([graph, session, x_check, l_check])
+    return([graph, session, optimizer, x_check, l_check])
 }
 
 async function deepTrain({
@@ -818,8 +880,9 @@ async function deepTrain({
 
     // await firstLearn();
     let [
-        feeder, graph, session, xFeed, lFeed, feedEntries, x_check, l_check
-    ] = [null, null, null, null, null, null, null, null]
+        feeder, graph, session, xFeed, lFeed, feedEntries, x_check, l_check,
+        optimizer
+    ] = [null, null, null, null, null, null, null, null, null]
 
     let [ds, xProvider, hProvider, cProvider, lProvider] = [
         null, null, null, null, null
@@ -831,34 +894,62 @@ async function deepTrain({
     }else{
         [ds, xProvider, hProvider, cProvider, lProvider] = dsProviders;
     }
+    // !!! REMOVE
+    [ds, xProvider, hProvider, cProvider, lProvider] = dsProviders;
 
-    debug.xProvider =  xProvider;
+    debug.xProvider = xProvider;
+    debug.lProvider = lProvider;
 
     // inject session with our modified version of train
     // maybe using bind to add the session context to the function ?
     // Ok rather than craping our pants here we will just modify the original
     // code...
 
-
-    // optimizer = new RMSPropOptimizer(learningRate, momentum);
-    // optimizer = new SGDOptimizer(learningRate);
     for (let i = 0; i < iterations; i++) {
 
         // we can chose to keep the same model / optimizer accross batches
         // or
         // we can chose to have a new model / optimizer for each batch
         if(modelByBatch){
+            if (model !== null){
+                // conserving  the graph is bad...
+                // modelParams.math = model.math;
+                // modelParams.session = model.session;
+                // modelParams.graph = model.graph;
+                // console.log("modelParams", modelParams);
+            }
+            console.log("modelParams", modelParams);
             model = getDeepModel(modelParams);
+            
+            /*
+            feeder.math = model.math;
             [xProvider, lProvider] = feeder.next();
+            */
+            
+            /*
+            if (feedEntries === null){
+                feedEntries = prepareFeed(model, xProvider, lProvider);
+            }
+            */
+
             debug.xProvider = xProvider;
+            debug.lProvider = lProvider;
+            debug.model = model;
         }
 
+        if (optimizer === null){
+            optimizer = getOptimizer(optimizerType, learningRate, momentum);
+        }
+
+        /*
         if (graph === null){
-            [graph, session, x_check, l_check] =
+            [graph, session, optimizer, x_check, l_check] =
                 prepareGraphSessOpt(
                     model, optimizerType, learningRate, momentum, learningRate,
                     momentum)
-        }
+
+            debug.optimizer = optimizer;
+        }*/
 
         if (feedEntries === null){
             feedEntries = prepareFeed(model, xProvider, lProvider);
@@ -889,8 +980,16 @@ async function deepTrain({
             }
         }
 
-        const cost = session.trainMod(
-            model.cost, feedEntries, batchSize, optimizer, CostReduction.MEAN);
+        console.log(
+            "====>",
+            model.cost,
+            feedEntries,
+            optimizer
+        )
+
+        const cost = model.session.trainMod(
+            model.cost, feedEntries, batchSize, optimizer,
+            CostReduction.MEAN);
 
         try {
             costVal = await cost.val();
@@ -900,17 +999,148 @@ async function deepTrain({
         console.log('last average cost (' + i + '): ' + costVal);
 
         if (optimizerByBatch){
+            /* When using feeder this does not change anything*/
+            feeder.allocated.forEach((mat) => {
+                if (
+                    (! mat.isDisposed)
+                ){ mat.dispose();}})
+            model.graph.nodes.forEach((node) => {
+                if (
+                    (node.data !== undefined) && (! node.data.isDisposed)
+                ){
+                    model.math.disposeData(node.data.id);
+                    // node.data.dispose();
+                }})
+            optimizer.dispose();
+            model.session.dispose();  // does not solve the mem leak
+            /* ND array is disposed
+            for (let b = 0; b < 64; b++){
+                notAllDisposed = false;
+                cx = xProvider.getNextCopy();
+                cl = lProvider.getNextCopy();
+                // if(! cx.isDisposed){
+                xProvider.disposeCopy(model.math, cx);
+                lProvider.disposeCopy(model.math, cl);
+                console.log(cx);
+                console.log(cl);
+                    // notAllDisposed = true;
+                // }
+            }
+            */
+            xProvider.disposeCopies(model.math);
+            lProvider.disposeCopies(model.math);
+
+
+            debug.optimizer = optimizer;
+            debug.graph = model.graph;
+            debug.session = model.session;
+
             feedEntries = null;
-            session.dispose();  // does not solve the mem leak
-            graph = null;
+            model.session = null;
+            optimizer = null;
+            model.graph = null;
         }
+
+        /*
+
+        model.session.runtime.nodes.forEach((node) => {
+
+            if((node.data !== undefined) && (!node.data.isDisposed)){
+                node.data.dispose(); }    
+            });
+
+        if (optimizerByBatch){
+            let [countDisposed, countUndisposed] = [0, 0];
+            debugDeep.model.graph.nodes.forEach((node) => {
+                if (
+                    (node.data !== undefined) && node.data.isDisposed
+                ){ countDisposed++; }
+                else if(node.data !== undefined){ countUndisposed++;}})
+            console.log(
+                "countDisposed:", countDisposed,
+                "countUndisposed", countUndisposed
+            );
+        */
+
+            /*
+            for(
+                [ar_id, count] of debugDeep.model.math.registeredArrays
+            ){
+                debugDeep.model.math.disposeData(ar_id); console.log(ar_id);
+            }
+            */
+
+            // let notAllDisposed = true;
+            // while (notAllDisposed){
+
+
+            /*
+            for (let b = 0; b < 64; b++){
+                notAllDisposed = false;
+                cx = xProvider.getNextCopy();
+                cl = lProvider.getNextCopy();
+                // if(! cx.isDisposed){
+                xProvider.disposeCopy(model.math, cx);
+                lProvider.disposeCopy(model.math, cl);
+                console.log(cx);
+                console.log(cl);
+                    // notAllDisposed = true;
+                // }
+    session
+            for (let b = 0; b < 64; b++){
+                notAllDisposed = false;
+                cx = debug.xProvider.getNextCopy();
+                cl = lProvider.getNextCopy();
+                // if(! cx.isDisposed){
+                debug.xProvider.disposeCopy(model.math, cx);
+                debug.lProvider.disposeCopy(model.math, cl);
+                console.log(cx);
+                console.log(cl);
+                    // notAllDisposed = true;
+                // }
+            }
+
+            debugDeep.model.graph.nodes.forEach((node) => {
+                if (
+                    (node.data !== undefined) && (! node.data.isDisposed)
+                ){ node.data.dispose();}})
+
+            // session.dispose();  // does not solve the mem leak
+            // optimizer.dispose();
+            // graph = null;
+
+
+            // ok, now this work but does produce errors
+            /*
+            model.session.math.backend.gpgpu.deleteProgram()
+            model.session.math.backend.gpgpu.deleteMatrixTexture()
+            model.session.math.backend.gpgpu.dispose()
+            model.session.math.backend.gpgpu = new GPGPUContext()
+            */
+
+            /*
+            [countDisposed, countUndisposed] = [0, 0];
+            debugDeep.model.graph.nodes.forEach((node) => {
+                if (
+                    (node.data !== undefined) && node.data.isDisposed
+                ){ countDisposed++; }
+                else if(node.data !== undefined){ countUndisposed++;}})
+            console.log(
+                "countDisposed:", countDisposed,
+                "countUndisposed", countUndisposed
+            );
+            */
+
+
+        // }
     }
 
-
+    /*
     console.log("!!!!!", model.cost, feedEntries, batchSize, optimizer)
     console.log(model, optimizer)
     console.log(optimizer.variableGradients)
     console.log(JSON.stringify(optimizer.variableGradients))
+    */
 
     debug.optimizer = optimizer;
     debug.session = session;
@@ -923,11 +1153,23 @@ function getDeepModel({
     hiddenSize=hiddenSize,
     inputSize=1,
     seqLength=seqLength,
-    init_weights=null
+    init_weights=null,
+    math=null,
+    graph=null,
+    session=null
 }){
-    math = ENV.math;
-    const graph = new Graph();
-    const session = new Session(graph, math);
+
+    if (math === null){
+        math = ENV.math;
+    }
+    if (graph === null){
+        graph = new Graph();
+    }
+    if (session === null){
+        session = new Session(graph, math);
+    }
+
+    console.log('math', math, 'graph', graph, 'session', session);
 
     let model = null;
 
@@ -958,6 +1200,7 @@ function getDeepModel({
 
     model.session = session;
     model.graph = graph;
+    model.math = math;
 
     return(model);
 
