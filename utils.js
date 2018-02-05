@@ -291,7 +291,7 @@ async function learnModel({
     rate=0.2, iterations=100, error=0.005, train_set_size=1000,
     trainSet=null, input_size=1, output_size=1, momentum=0.9,
     batchSize=64, seqLength=null, optimizer=null,
-    modelByBatch=false
+    modelByBatch=false, optimizerByBatch=false
 }){
 
     console.assert(typeof(rate) === 'number');
@@ -398,7 +398,7 @@ async function learnModel({
 
         let [dlDS, dsParameters] = [null, null];
 
-        // if (modelByBatch){
+        if (modelByBatch){
             dsParameters = {
                 ds: trainSet,
                 dim: input_size,
@@ -408,7 +408,7 @@ async function learnModel({
                 hiddenSize: hidden_size[0],
                 make2d: true
             }
-        // }else{
+        }else{
             dlDS = dsToDeepDS({
                 ds: trainSet,
                 dim: input_size,
@@ -418,8 +418,8 @@ async function learnModel({
                 hiddenSize: hidden_size[0],
                 make2d: true
             });
-        // }
-    
+        }
+
         await deepTrain({
             model: model,
             modelParams,

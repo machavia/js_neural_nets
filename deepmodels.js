@@ -335,101 +335,6 @@ class LSTMCell{
 }
 
 
-/** TODO delete
-* Stolen from session.optimizer, manually transpiled to JS
-* Trains a batch.
-* Returns a reduced cost if the costReduction parameter is set.
-* When using a `NDArrayMath` object in safe mode this must be used in a
-* math.scope().
-* @param costTensor A tensor representing the cost to optimize. Should be a
-* scalar.
-* @param feedEntries Feed entries for this train run. Provides inputs.
-* @param batchSize Batch size for this train loop.
-* @param optimizer An optimizer to perform weight updates.
-* @param costReduction An option to allow the user to get a summed, averaged,
-* or no cost back.
-* @return The reduced cost, if cost reduction is not NONE. The user is
-* responsible for disposing the cost NDArray between train loops.
-*/
-var FeedDictionary = (function () {
-    function FeedDictionary(feedEntries) {
-        var _this = this;
-        this.dict = {};
-        if (feedEntries) {
-            feedEntries.forEach(function (entry) { return _this.dict[entry.tensor.id] = entry; });
-        }
-    }
-    return FeedDictionary;
-}());
-function trainModified(
-    costTensor, feedEntries, batchSize,
-    optimizer, costReduction = CostReduction.NONE
-){
-    util.assert(
-        util.isScalarShape(costTensor.shape),
-        'Cost tensor for training must be a scalar value.');
-
-    if (this.prevBatchSize !== batchSize) {
-        this.prevBatchSize = batchSize;
-        if (this.batchSizeScalar != null) {
-            this.batchSizeScalar.dispose();
-        }
-        this.batchSizeScalar = this.math.keep(Scalar.new(batchSize));
-    }
-
-    const feed = new FeedDictionary(feedEntries);
-    session_util.throwIfFeedDictionaryContainsNDArrays(feed);
-
-    const runtime = this.getOrCreateRuntime([costTensor], feed);
-    const inferenceOperations = runtime.operations;
-    const backPropOperations = runtime.operations.slice().reverse();
-    const activations = this.activationArrayMap;
-    const gradients = this.gradientArrayMap;
-    gradients.nullify(costTensor);
-    gradients.add(costTensor, this.oneScalar);
-
-    session_util.addPersistentArraysToTensorArrayMap(
-        runtime.nodes, activations);
-
-    optimizer.beforeBatch(
-        this.math, batchSize, runtime, activations, gradients);
-
-    return this.math.scope(() => {
-      let cost = Scalar.new(0);
-
-      for (let i = 0; i < batchSize; ++i) {
-        session_util.disposeAndInitializeOperationOutputs(
-            runtime.nodes, activations);
-        session_util.disposeAndInitializeOperationInputGradients(
-            runtime.nodes, gradients);
-        session_util.disposeTransientOperationArrays(
-            runtime.operations, activations, gradients);
-
-        session_util.loadInputsFromFeedDictionaryToTensorArrayMap(
-            feed, activations, this.math);
-
-        inferenceOperations.forEach(
-            op => op.feedForward(this.math, activations));
-        backPropOperations.forEach(
-            op => op.backProp(this.math, activations, gradients));
-
-        optimizer.afterExample(this.math, runtime, activations, gradients);
-
-        session_util.releaseFeedDictionaryInputsFromTensorArrayMap(
-            feed, activations, this.math);
-
-        cost = this.updateCostForExample(
-            cost, activations.get(costTensor),
-            costReduction);
-      }
-
-      optimizer.afterBatch(
-          this.math, batchSize, runtime, activations, gradients);
-
-      return this.updateCostForBatch(cost, costReduction);
-    });
-}
-
 class LSTMCellShared{
     constructor({
         graph, input_size=2, hidden_size=3, nPredictions=1,
@@ -823,37 +728,6 @@ function getOptimizer(optimizerType, learningRate, momentum){
     return(optimizer)
 }
 
-function prepareGraphSessOpt(model, optimizerType, learningRate, momentum){
-
-    console.assert(model !== null);
-
-    graph = model.graph;
-    session = model.session;
-
-    x_check = graph.reshape(model.x, model.x.shape);
-    l_check = graph.reshape(model.y, model.y.shape);
-
-    switch (optimizerType){
-        case 'momentum':
-            optimizer = new MomentumOptimizer(learningRate, momentum);
-            break;
-        case 'SGD':
-            optimizer = new SGDOptimizer(learningRate);
-            break;
-        case 'RMSProp':
-            optimizer = new RMSPropOptimizer(learningRate, momentum);
-            break;
-        case 'Adam':
-            optimizer = new AdamOptimizer(learningRate, momentum, 0.999);
-            break;
-        case 'Adagrad':
-            optimizer = new AdagradOptimizer(learningRate, momentum);
-            break;
-    }
-
-    return([graph, session, optimizer, x_check, l_check])
-}
-
 async function deepTrain({
     model=null,
     modelParams=null,
@@ -869,7 +743,9 @@ async function deepTrain({
     modelByBatch=false
 }){
 
+
     // Houston we have a memory leak !
+    // Only GPU ?
 
     console.assert(typeof(batchSize) === 'number');
     console.assert(typeof(learningRate) === 'number');
@@ -895,151 +771,152 @@ async function deepTrain({
         [ds, xProvider, hProvider, cProvider, lProvider] = dsProviders;
     }
     // !!! REMOVE
-    [ds, xProvider, hProvider, cProvider, lProvider] = dsProviders;
+    // [ds, xProvider, hProvider, cProvider, lProvider] = dsProviders;
 
     debug.xProvider = xProvider;
     debug.lProvider = lProvider;
+    debug.model = model;
 
     // inject session with our modified version of train
     // maybe using bind to add the session context to the function ?
     // Ok rather than craping our pants here we will just modify the original
     // code...
 
-    for (let i = 0; i < iterations; i++) {
+    if (model === null){
+        deeplearn.ENV.setMath(new deeplearn.NDArrayMath('cpu', true))
+        math = ENV.math;
+    }else{
+        math = model.math;
+    }
 
-        // we can chose to keep the same model / optimizer accross batches
-        // or
-        // we can chose to have a new model / optimizer for each batch
-        if(modelByBatch){
-            if (model !== null){
-                // conserving  the graph is bad...
-                // modelParams.math = model.math;
-                // modelParams.session = model.session;
-                // modelParams.graph = model.graph;
-                // console.log("modelParams", modelParams);
+    await math.scope(async () => {
+
+        for (let i = 0; i < iterations; i++) {
+
+            // we can chose to keep the same model / optimizer accross batches
+            // or
+            // we can chose to have a new model / optimizer for each batch
+            if(modelByBatch){
+                if (model !== null){
+                    // conserving  the graph is bad...
+                    // modelParams.math = model.math;
+                    // modelParams.session = model.session;
+                    // modelParams.graph = model.graph;
+                    // console.log("modelParams", modelParams);
+                }
+                modelParams.math = math;
+                console.log("modelParams", modelParams);
+                model = getDeepModel(modelParams);
+                feeder.math = model.math;
+                
+                [xProvider, lProvider] = feeder.next();
+
+                debug.xProvider = xProvider;
+                debug.lProvider = lProvider;
+                debug.model = model;
+                
             }
-            console.log("modelParams", modelParams);
-            model = getDeepModel(modelParams);
-            
-            /*
-            feeder.math = model.math;
-            [xProvider, lProvider] = feeder.next();
-            */
-            
-            /*
+
+            if (optimizer === null){
+                optimizer = getOptimizer(optimizerType, learningRate, momentum);
+            }
+            debug.optimizer = optimizer;
+
             if (feedEntries === null){
                 feedEntries = prepareFeed(model, xProvider, lProvider);
             }
-            */
 
-            debug.xProvider = xProvider;
-            debug.lProvider = lProvider;
-            debug.model = model;
-        }
-
-        if (optimizer === null){
-            optimizer = getOptimizer(optimizerType, learningRate, momentum);
-        }
-
-        /*
-        if (graph === null){
-            [graph, session, optimizer, x_check, l_check] =
-                prepareGraphSessOpt(
-                    model, optimizerType, learningRate, momentum, learningRate,
-                    momentum)
-
-            debug.optimizer = optimizer;
-        }*/
-
-        if (feedEntries === null){
-            feedEntries = prepareFeed(model, xProvider, lProvider);
-        }
-
-        // Train takes a cost tensor to minimize. Trains one batch. Returns the
-        // average cost as a Scalar.
-        if(printInfo){
-            /*
-            const [p1, x1, t1] = session.evalAll(
-                [model.output, x_check, l_check], feedEntries
-            );
-            console.log("p:", p1.dataSync(), "t:", t1.dataSync());
-            */
-            for(let i = 0; i <= 100; i++){
-                let input = model.x.shape.length === 1 ?
-                    Array1D.new(ds[i].input):
-                    Array2D.new(model.x.shape, ds[i].input);
-                let target = ds[i].output; 
-                let pred = session.eval(
-                    model.output, [{tensor: model.x, data: input}]
+            // Train takes a cost tensor to minimize. Trains one batch. Returns the
+            // average cost as a Scalar.
+            if(printInfo){
+                /*
+                const [p1, x1, t1] = session.evalAll(
+                    [model.output, x_check, l_check], feedEntries
                 );
-                try {
-                    console.log("p:", pred.dataSync(), "t:", target);
-                } catch (e){
-                    console.log("Error at dataSync", e);
+                console.log("p:", p1.dataSync(), "t:", t1.dataSync());
+                */
+                for(let i = 0; i <= 100; i++){
+                    let input = model.x.shape.length === 1 ?
+                        Array1D.new(ds[i].input):
+                        Array2D.new(model.x.shape, ds[i].input);
+                    let target = ds[i].output; 
+                    let pred = session.eval(
+                        model.output, [{tensor: model.x, data: input}]
+                    );
+                    try {
+                        console.log("p:", pred.dataSync(), "t:", target);
+                    } catch (e){
+                        console.log("Error at dataSync", e);
+                    }
                 }
             }
-        }
 
-        console.log(
-            "====>",
-            model.cost,
-            feedEntries,
-            optimizer
-        )
+            console.log("====>", model.cost, feedEntries, optimizer)
 
-        const cost = model.session.trainMod(
-            model.cost, feedEntries, batchSize, optimizer,
-            CostReduction.MEAN);
+            const cost = model.session.trainMod(
+                model.cost, feedEntries, batchSize, optimizer,
+                CostReduction.MEAN);
 
-        try {
-            costVal = await cost.val();
-        } catch(e){
-            console.log("Error at await", e);
-        }
-        console.log('last average cost (' + i + '): ' + costVal);
-
-        if (optimizerByBatch){
-            /* When using feeder this does not change anything*/
-            feeder.allocated.forEach((mat) => {
-                if (
-                    (! mat.isDisposed)
-                ){ mat.dispose();}})
-            model.graph.nodes.forEach((node) => {
-                if (
-                    (node.data !== undefined) && (! node.data.isDisposed)
-                ){
-                    model.math.disposeData(node.data.id);
-                    // node.data.dispose();
-                }})
-            optimizer.dispose();
-            model.session.dispose();  // does not solve the mem leak
-            /* ND array is disposed
-            for (let b = 0; b < 64; b++){
-                notAllDisposed = false;
-                cx = xProvider.getNextCopy();
-                cl = lProvider.getNextCopy();
-                // if(! cx.isDisposed){
-                xProvider.disposeCopy(model.math, cx);
-                lProvider.disposeCopy(model.math, cl);
-                console.log(cx);
-                console.log(cl);
-                    // notAllDisposed = true;
-                // }
+            try {
+                costVal = await cost.val();
+            } catch(e){
+                console.log("Error at await", e);
             }
-            */
-            xProvider.disposeCopies(model.math);
-            lProvider.disposeCopies(model.math);
+            console.log('last average cost (' + i + '): ' + costVal);
 
 
-            debug.optimizer = optimizer;
-            debug.graph = model.graph;
-            debug.session = model.session;
+            if (optimizerByBatch){
+                /* When using feeder this does not change anything*/
+                feeder.allocated.forEach((mat) => {
+                    if (
+                        (! mat.isDisposed)
+                    ){ mat.dispose();}})
+                model.graph.nodes.forEach((node) => {
+                    if (
+                        (node.data !== undefined) && (! node.data.isDisposed)
+                    ){
+                        model.math.disposeData(node.data.id);
+                        // node.data.dispose();
+                    }})
 
-            feedEntries = null;
-            model.session = null;
-            optimizer = null;
-            model.graph = null;
-        }
+                optimizer.dispose();
+                model.session.dispose();  // does not solve the mem leak
+                /* ND array is disposed
+                for (let b = 0; b < 64; b++){
+                    notAllDisposed = false;
+                    cx = xProvider.getNextCopy();
+                    cl = lProvider.getNextCopy();
+                    // if(! cx.isDisposed){
+                    xProvider.disposeCopy(model.math, cx);
+                    lProvider.disposeCopy(model.math, cl);
+                    console.log(cx);
+                    console.log(cl);
+                        // notAllDisposed = true;
+                    // }
+                }
+                */
+
+                model.math.backendEngine.activeScope.track.forEach(node => {
+                    if(! node.isDisposed){
+                        console.log(node.dataId)
+                        node.dispose()
+                    }
+                })
+
+                xProvider.disposeCopies(model.math);
+                lProvider.disposeCopies(model.math);
+
+
+                debug.optimizer = optimizer;
+                debug.graph = model.graph;
+                debug.session = model.session;
+
+                feedEntries = null;
+                model.session = null;
+                optimizer = null;
+                model.graph = null;
+            }
+        } // )
 
         /*
 
@@ -1086,7 +963,6 @@ async function deepTrain({
                 console.log(cl);
                     // notAllDisposed = true;
                 // }
-    session
             for (let b = 0; b < 64; b++){
                 notAllDisposed = false;
                 cx = debug.xProvider.getNextCopy();
@@ -1133,7 +1009,7 @@ async function deepTrain({
 
 
         // }
-    }
+    })
 
     /*
     console.log("!!!!!", model.cost, feedEntries, batchSize, optimizer)
@@ -1160,6 +1036,7 @@ function getDeepModel({
 }){
 
     if (math === null){
+        deeplearn.ENV.setMath(new deeplearn.NDArrayMath('cpu', false))
         math = ENV.math;
     }
     if (graph === null){
@@ -1229,3 +1106,18 @@ exports.protoSerialize = protoSerialize;
 })(
     typeof exports === 'undefined'?  this['deepmodels']={}: exports
 );
+
+
+/*
+deeplearn.ENV.getBackend("cpu")
+deeplearn.NDArrayMathCPU
+
+// Everything ever tracked is here:
+debugDeep.model.math.backendEngine.activeScope.track.forEach(node => {
+    if(! node.isDisposed){
+        console.log(node.dataId)
+        node.dispose()
+    }
+})
+
+*/
