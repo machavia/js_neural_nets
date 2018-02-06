@@ -67,18 +67,15 @@ async function doBatch(
     // or
     // we can chose to have a new model / optimizer for each batch
     if(modelByBatch){
-        modelParams.math = math;
         model = getDeepModel(modelParams);
         feeder.math = model.math;
-        
         [xProvider, lProvider] = feeder.next();
-
     }
 
     // when setting optimizer_by_batch = false with
-    // model_by_btach = false ==> error, optimizer by batch probabl
+    // model_by_btach = false ==> error, optimizer by batch probably
     // keeps old refs
-    if (optimizer === null){
+    if (optimizerByBatch){
         optimizer = getOptimizer(optimizerType, learningRate, momentum);
     }
 
@@ -121,24 +118,15 @@ async function doBatch(
     }
     console.log('last average cost (' + i + '): ' + costVal);
 
-
-    if (optimizerByBatch){
-        optimizer.cGraph.dispose()
-        optimizer.dispose();
-        optimizer = null;
-    }
-
     if (modelByBatch){
         modelParams.session = model.session;
         modelParams.graph= model.graph ;
         model.graph.nodes.forEach((node) => {
-                if (
-                    (node.data !== undefined) && (! node.data.isDisposed)
-                ){ node.data.dispose();}
+            if (
+                (node.data !== undefined) && (! node.data.isDisposed)
+            ){ node.data.dispose();}
         })
         model.graph.nodes = model.graph.nodes.slice(0, 0);
-
-        feedEntries = null;
 
     }
 

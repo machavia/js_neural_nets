@@ -782,6 +782,16 @@ async function deepTrain({
 
     await math.scope(async () => {
 
+        if(modelByBatch && optimizerByBatch){
+            math = null;
+            feedEntries = null;
+            optimizer = null;
+            model = null;
+        }
+        if(! modelByBatch){
+
+        }
+
         for (let i = 0; i < iterations; i++) {
             await doBatch(
                 batchSize,
