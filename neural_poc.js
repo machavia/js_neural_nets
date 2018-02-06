@@ -9,9 +9,10 @@ speedTest = utils.speedTest;
 testBatch = utils.testBatch;
 debug = utils.debug;
 debugDeep = deepmodels.debug;
-protoSerialize = deepmodels.protoSerialize;
 
 window.onload = function(){
+
+    new SharedWorker('worker.js');
 
     let ret = speedTest(100);
 
@@ -98,27 +99,32 @@ window.onload = function(){
     );
 
     $("#kepler").click(
-        () => {
+        async () => {
             trainSet = dataSetter("train");
             debug.trainSet = trainSet;
             n_hidden_val = String($("#n_hidden").val());
             n_hidden_array = n_hidden_val.split(',').map((x) => parseInt(x));
 
-            model = learnModel({
-                model_type: $("#algo").val(),
-                rate: parseFloat($("#lr").val()),
-                batchSize: parseInt($("#batch_size").val()),
-                iterations: parseInt($("#iter").val()),
-                trainSet: trainSet,
-                input_size: parseInt($("#n_input").val()),
-                hidden_size: n_hidden_array,
-                output_size: parseInt($("#n_output").val()),
-                seqLength: parseInt($("#seq_length").val()),
-                optimizer: $("#optimizer").val(),
-                optimizerByBatch:
-                    Boolean(parseInt($("#optimizerByBatch").val())),
-                modelByBatch: Boolean(parseInt($("#modelByBatch").val()))
-            });
+            const inneriIterations = parseInt($("#iter").val());
+            const outerIterations= 1;
+
+            for (let i = 0; i < outerIterations; i++){
+                model = await learnModel({
+                    model_type: $("#algo").val(),
+                    rate: parseFloat($("#lr").val()),
+                    batchSize: parseInt($("#batch_size").val()),
+                    iterations: inneriIterations,
+                    trainSet: trainSet,
+                    input_size: parseInt($("#n_input").val()),
+                    hidden_size: n_hidden_array,
+                    output_size: parseInt($("#n_output").val()),
+                    seqLength: parseInt($("#seq_length").val()),
+                    optimizer: $("#optimizer").val(),
+                    optimizerByBatch:
+                        Boolean(parseInt($("#optimizerByBatch").val())),
+                    modelByBatch: Boolean(parseInt($("#modelByBatch").val()))
+                });
+            }
         }
     );
 

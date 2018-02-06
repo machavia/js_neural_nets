@@ -71,6 +71,7 @@ if(typeof(require) === 'function'){
 
 /* stolen from graph/graph.ts + modified */
 function addDense(
+    math,
     graph, name, x, units,
     activation, useBias = true,
     kernelInitializer = null,
@@ -78,25 +79,29 @@ function addDense(
     kernelVariable = null,
     biasVariable = null
 ){
+
     if (kernelInitializer === null){
-         kernelInitializer = new VarianceScalingInitializer();
+         kernelInitializer = math.scope(() => {
+             return(new VarianceScalingInitializer())});
     }
     if (biasInitializer === null){
-        biasInitializer = new ZerosInitializer();
+        biasInitializer = math.scope(() => {return(new ZerosInitializer())});
     }
     const weights = kernelVariable === null ?
         graph.variable(
             name + '-weights',
-            kernelInitializer.initialize(
-                [x.shape[0], units], x.shape[0], units
-            )
+            math.scope(() => {
+                return(kernelInitializer.initialize(
+                    [x.shape[0], units], x.shape[0], units
+                ));
+            })
         ) :
         kernelVariable;
 
     let lin;
     let out;
     let toReturn = [];
-    const mm = graph.matmul(x, weights);
+    const mm = math.scope(() => {return(graph.matmul(x, weights))});
 
     toReturn.push(weights);
 
@@ -104,8 +109,12 @@ function addDense(
         const bias = biasVariable === null ?
             graph.variable(
                 name + '-bias',
-                biasInitializer.initialize([units], x.shape[0], units)):
-            biasVariable;
+                math.scope(() => {
+                    return(
+                        biasInitializer.initialize([units], x.shape[0], units)
+                    );
+                })
+            ) : biasVariable;
         lin = graph.add(mm, bias);
         toReturn.push(bias);
     }else{
@@ -229,6 +238,7 @@ class LSTMCell{
         let XH = graph.concat1d(this.x, this.h_tm1);
 
         [[this.Wi, this.bi], this.i] = addDense(
+            math,
             graph,
             'i', XHC_prev, hidden_size,
             (x) => graph.sigmoid(x), true,
@@ -237,6 +247,7 @@ class LSTMCell{
              // graph.layers.dense
 
         [[this.Wf, this.bf], this.f] = addDense(
+            math,
             graph,
             'f', XHC_prev, hidden_size,
             (x) => graph.sigmoid(x), true,
@@ -246,6 +257,7 @@ class LSTMCell{
 
         let half_c;
         [[this.Wc, this.bc], half_c] = addDense(
+            math,
             graph,
             'c_half', XH, hidden_size,
             (x) => graph.tanh(x), true,
@@ -262,6 +274,7 @@ class LSTMCell{
         );
 
         [[this.Wo, this.bo], this.o] = addDense(
+            math,
             graph,
             'o', XHC, hidden_size,
             (x) => graph.sigmoid(x), true,
@@ -273,6 +286,7 @@ class LSTMCell{
         this.h = graph.multiply(this.o, graph.tanh(this.c));
 
         [[this.Wout, this.bout], this.output] = addDense(
+            math,
             graph,
             'classif', this.h, nPredictions,
             (x) => graph.sigmoid(x), true,
@@ -337,6 +351,7 @@ class LSTMCell{
 
 class LSTMCellShared{
     constructor({
+        math,
         graph, input_size=2, hidden_size=3, nPredictions=1,
         x=null, h_tm1=null, c_tm1=null, add_cost=true, sharedVariables=null
     }){
@@ -397,6 +412,7 @@ class LSTMCellShared{
         let XH = graph.concat1d(this.x, this.h_tm1);
 
         [[this.Wi, this.bi], this.i] = addDense(
+            math,
             graph,
             'i', XHC_prev, hidden_size,
             (x) => graph.sigmoid(x), true,
@@ -405,6 +421,7 @@ class LSTMCellShared{
              // graph.layers.dense
 
         [[this.Wf, this.bf], this.f] = addDense(
+            math,
             graph,
             'f', XHC_prev, hidden_size,
             (x) => graph.sigmoid(x), true,
@@ -414,6 +431,7 @@ class LSTMCellShared{
 
         let half_c;
         [[this.Wc, this.bc], half_c] = addDense(
+            math,
             graph,
             'c_half', XH, hidden_size,
             (x) => graph.tanh(x), true,
@@ -430,6 +448,7 @@ class LSTMCellShared{
         );
 
         [[this.Wo, this.bo], this.o] = addDense(
+            math,
             graph,
             'o', XHC, hidden_size,
             (x) => graph.sigmoid(x), true,
@@ -445,32 +464,40 @@ class LSTMCellShared{
         if (add_cost){
 
             [[this.Wout, this.bout], this.output] = addDense(
+                math,
                 graph,
                 'classif', this.h, nPredictions,
                 (x) => graph.sigmoid(x), true,
                 null, null, null, null 
                 );
                 // graph.layers.dense
+            //
+            const EPSILON = 1e-7;
+            
+            const arrayOne = math.scope(() => {return(Array1D.new([1]));})
+            const arrayMOne = math.scope(() => {return(Array1D.new([-1]));})
+            const eps = math.scope(() => {return(Array1D.new([EPSILON]));})
 
             this.y = graph.placeholder('y', [nPredictions]);
-            const EPSILON = 1e-7;
             this.cost = graph.reduceSum(graph.add(
-                graph.multiply(
-                    graph.constant([-1]),
                     graph.multiply(
-                        this.y,
-                        graph.log(
-                            graph.add(
-                                this.output, graph.constant([EPSILON]))))),
-                graph.multiply(
-                    graph.constant([-1]),
+                        graph.constant(arrayMOne),
+                        graph.multiply(
+                            this.y,
+                            graph.log(
+                                graph.add(
+                                    this.output,
+                                    graph.constant(eps))))),
                     graph.multiply(
-                        graph.subtract(graph.constant([1]), this.y),
-                        graph.log(
-                            graph.add(
-                                graph.subtract(
-                                    graph.constant([1]), this.output),
-                                graph.constant([EPSILON])))))));
+                        graph.constant(arrayMOne),
+                        graph.multiply(
+                            graph.subtract(
+                                graph.constant(arrayOne), this.y),
+                            graph.log(
+                                graph.add(
+                                    graph.subtract(
+                                        graph.constant(arrayOne), this.output),
+                                    graph.constant(eps)))))));
         }
 
         console.log("nPredictions:", nPredictions)
@@ -490,7 +517,7 @@ class LSTMCellShared{
 class RNNShared{
 
     constructor({
-        graph, session, inputSize=2, hiddenSize=3, nPredictions=1,
+        math, graph, session, inputSize=2, hiddenSize=3, nPredictions=1,
         cellClass=LSTMCellShared, seqLength=10, init_weights=null,
         sharedVariables=null
     }){
@@ -527,6 +554,7 @@ class RNNShared{
             }
 
             let cell = new cellClass({
+                math,
                 graph, input_size: inputSize, hidden_size: hiddenSize,
                 nPredictions: nPredictions,
                 h_tm1: h_tm1, c_tm1: c_tm1,
@@ -627,13 +655,11 @@ class Feeder{
 
             let toGet = this.addState ? [x, h, c, labels] : [x, labels];
 
-            console.log(InCPUMemoryShuffledInputProviderBuilderExtended);
-
             // Shuffles inputs and labels and keeps them mutually in sync.
             shuffledInputProviderBuilder =
                 new InCPUMemoryShuffledInputProviderBuilderExtended(toGet);
 
-            debug.shuffledInputProvider = shuffledInputProviderBuilder;
+            // debug.shuffledInputProvider = shuffledInputProviderBuilder;
 
             let toReturn = 
                 shuffledInputProviderBuilder.getInputProviders();
@@ -676,13 +702,11 @@ function dsToDeepDS({
         }
     }
 
-    console.log(InCPUMemoryShuffledInputProviderBuilderExtended);
-
     // Shuffles inputs and labels and keeps them mutually in sync.
     shuffledInputProviderBuilder =
         new InCPUMemoryShuffledInputProviderBuilderExtended([x, h, c, labels]);
 
-    debug.shuffledInputProvider = shuffledInputProviderBuilder;
+    // debug.shuffledInputProvider = shuffledInputProviderBuilder;
 
     [xProvider, hProvider, cProvider, lProvider] =
         shuffledInputProviderBuilder.getInputProviders();
@@ -752,7 +776,6 @@ async function deepTrain({
     console.assert(typeof(momentum) === 'number');
     console.assert(typeof(iterations) === 'number');
 
-    debug.ds = dsParameters;
 
     // await firstLearn();
     let [
@@ -773,9 +796,12 @@ async function deepTrain({
     // !!! REMOVE
     // [ds, xProvider, hProvider, cProvider, lProvider] = dsProviders;
 
+    debug.ds = dsParameters;
     debug.xProvider = xProvider;
     debug.lProvider = lProvider;
     debug.model = model;
+    debug.ENV = ENV;
+    // ENV.empty()
 
     // inject session with our modified version of train
     // maybe using bind to add the session context to the function ?
@@ -788,6 +814,8 @@ async function deepTrain({
     }else{
         math = model.math;
     }
+
+    // math.enableDebugMode();
 
     await math.scope(async () => {
 
@@ -805,21 +833,23 @@ async function deepTrain({
                     // console.log("modelParams", modelParams);
                 }
                 modelParams.math = math;
-                console.log("modelParams", modelParams);
                 model = getDeepModel(modelParams);
                 feeder.math = model.math;
                 
                 [xProvider, lProvider] = feeder.next();
 
-                debug.xProvider = xProvider;
-                debug.lProvider = lProvider;
-                debug.model = model;
-                
             }
 
+            // when setting optimizer_by_batch = false with
+            // model_by_btach = false ==> error, optimizer by batch probabl
+            // keeps old refs
             if (optimizer === null){
                 optimizer = getOptimizer(optimizerType, learningRate, momentum);
             }
+
+            debug.xProvider = xProvider;
+            debug.lProvider = lProvider;
+            debug.model = model;
             debug.optimizer = optimizer;
 
             if (feedEntries === null){
@@ -829,12 +859,6 @@ async function deepTrain({
             // Train takes a cost tensor to minimize. Trains one batch. Returns the
             // average cost as a Scalar.
             if(printInfo){
-                /*
-                const [p1, x1, t1] = session.evalAll(
-                    [model.output, x_check, l_check], feedEntries
-                );
-                console.log("p:", p1.dataSync(), "t:", t1.dataSync());
-                */
                 for(let i = 0; i <= 100; i++){
                     let input = model.x.shape.length === 1 ?
                         Array1D.new(ds[i].input):
@@ -851,7 +875,6 @@ async function deepTrain({
                 }
             }
 
-            console.log("====>", model.cost, feedEntries, optimizer)
 
             const cost = model.session.trainMod(
                 model.cost, feedEntries, batchSize, optimizer,
@@ -866,7 +889,14 @@ async function deepTrain({
 
 
             if (optimizerByBatch){
+                optimizer.cGraph.dispose()
+                optimizer.dispose();
+                optimizer = null;
+            }
+
+            if (modelByBatch){
                 /* When using feeder this does not change anything*/
+                /*
                 feeder.allocated.forEach((mat) => {
                     if (
                         (! mat.isDisposed)
@@ -879,8 +909,10 @@ async function deepTrain({
                         // node.data.dispose();
                     }})
 
-                optimizer.dispose();
                 model.session.dispose();  // does not solve the mem leak
+                */
+
+
                 /* ND array is disposed
                 for (let b = 0; b < 64; b++){
                     notAllDisposed = false;
@@ -894,27 +926,34 @@ async function deepTrain({
                         // notAllDisposed = true;
                     // }
                 }
-                */
-
                 model.math.backendEngine.activeScope.track.forEach(node => {
                     if(! node.isDisposed){
                         console.log(node.dataId)
                         node.dispose()
                     }
                 })
+                */
 
+                /*
                 xProvider.disposeCopies(model.math);
                 lProvider.disposeCopies(model.math);
+                */
 
+                modelParams.session = model.session;
+                modelParams.graph= model.graph ;
+                model.graph.nodes.forEach((node) => {
+                        if (
+                            (node.data !== undefined) && (! node.data.isDisposed)
+                        ){ node.data.dispose();}
+                })
+                model.graph.nodes = model.graph.nodes.slice(0, 0);
 
-                debug.optimizer = optimizer;
-                debug.graph = model.graph;
-                debug.session = model.session;
-
-                feedEntries = null;
+                /*
                 model.session = null;
-                optimizer = null;
                 model.graph = null;
+                */
+                feedEntries = null;
+
             }
         } // )
 
@@ -939,77 +978,81 @@ async function deepTrain({
             );
         */
 
-            /*
-            for(
-                [ar_id, count] of debugDeep.model.math.registeredArrays
-            ){
-                debugDeep.model.math.disposeData(ar_id); console.log(ar_id);
-            }
-            */
+        /*
+        for(
+            [ar_id, count] of debugDeep.model.math.registeredArrays
+        ){
+            debugDeep.model.math.disposeData(ar_id); console.log(ar_id);
+        }
+        */
 
-            // let notAllDisposed = true;
-            // while (notAllDisposed){
-
-
-            /*
-            for (let b = 0; b < 64; b++){
-                notAllDisposed = false;
-                cx = xProvider.getNextCopy();
-                cl = lProvider.getNextCopy();
-                // if(! cx.isDisposed){
-                xProvider.disposeCopy(model.math, cx);
-                lProvider.disposeCopy(model.math, cl);
-                console.log(cx);
-                console.log(cl);
-                    // notAllDisposed = true;
-                // }
-            for (let b = 0; b < 64; b++){
-                notAllDisposed = false;
-                cx = debug.xProvider.getNextCopy();
-                cl = lProvider.getNextCopy();
-                // if(! cx.isDisposed){
-                debug.xProvider.disposeCopy(model.math, cx);
-                debug.lProvider.disposeCopy(model.math, cl);
-                console.log(cx);
-                console.log(cl);
-                    // notAllDisposed = true;
-                // }
-            }
-
-            debugDeep.model.graph.nodes.forEach((node) => {
-                if (
-                    (node.data !== undefined) && (! node.data.isDisposed)
-                ){ node.data.dispose();}})
-
-            // session.dispose();  // does not solve the mem leak
-            // optimizer.dispose();
-            // graph = null;
+        // let notAllDisposed = true;
+        // while (notAllDisposed){
 
 
-            // ok, now this work but does produce errors
-            /*
-            model.session.math.backend.gpgpu.deleteProgram()
-            model.session.math.backend.gpgpu.deleteMatrixTexture()
-            model.session.math.backend.gpgpu.dispose()
-            model.session.math.backend.gpgpu = new GPGPUContext()
-            */
+        /*
+        for (let b = 0; b < 64; b++){
+            notAllDisposed = false;
+            cx = xProvider.getNextCopy();
+            cl = lProvider.getNextCopy();
+            // if(! cx.isDisposed){
+            xProvider.disposeCopy(model.math, cx);
+            lProvider.disposeCopy(model.math, cl);
+            console.log(cx);
+            console.log(cl);
+                // notAllDisposed = true;
+            // }
+        for (let b = 0; b < 64; b++){
+            notAllDisposed = false;
+            cx = debug.xProvider.getNextCopy();
+            cl = lProvider.getNextCopy();
+            // if(! cx.isDisposed){
+            debug.xProvider.disposeCopy(model.math, cx);
+            debug.lProvider.disposeCopy(model.math, cl);
+            console.log(cx);
+            console.log(cl);
+                // notAllDisposed = true;
+            // }
+        }
 
-            /*
-            [countDisposed, countUndisposed] = [0, 0];
-            debugDeep.model.graph.nodes.forEach((node) => {
-                if (
-                    (node.data !== undefined) && node.data.isDisposed
-                ){ countDisposed++; }
-                else if(node.data !== undefined){ countUndisposed++;}})
-            console.log(
-                "countDisposed:", countDisposed,
-                "countUndisposed", countUndisposed
-            );
-            */
+        debugDeep.model.graph.nodes.forEach((node) => {
+            if (
+                (node.data !== undefined) && (! node.data.isDisposed)
+            ){ node.data.dispose();}})
+
+        // session.dispose();  // does not solve the mem leak
+        // optimizer.dispose();
+        // graph = null;
+
+
+        // ok, now this work but does produce errors
+        /*
+        model.session.math.backend.gpgpu.deleteProgram()
+        model.session.math.backend.gpgpu.deleteMatrixTexture()
+        model.session.math.backend.gpgpu.dispose()
+        model.session.math.backend.gpgpu = new GPGPUContext()
+        */
+
+        /*
+        [countDisposed, countUndisposed] = [0, 0];
+        debugDeep.model.graph.nodes.forEach((node) => {
+            if (
+                (node.data !== undefined) && node.data.isDisposed
+            ){ countDisposed++; }
+            else if(node.data !== undefined){ countUndisposed++;}})
+        console.log(
+            "countDisposed:", countDisposed,
+            "countUndisposed", countUndisposed
+        );
+        */
 
 
         // }
     })
+
+    // modelParams.session.dispose();
+    // ENV.globalMath.registeredArrays.clear()
+
 
     /*
     console.log("!!!!!", model.cost, feedEntries, batchSize, optimizer)
@@ -1017,9 +1060,6 @@ async function deepTrain({
     console.log(optimizer.variableGradients)
     console.log(JSON.stringify(optimizer.variableGradients))
     */
-
-    debug.optimizer = optimizer;
-    debug.session = session;
 
 }
 
@@ -1046,14 +1086,12 @@ function getDeepModel({
         session = new Session(graph, math);
     }
 
-    console.log('math', math, 'graph', graph, 'session', session);
-
     let model = null;
 
     switch (modelType){
         case 'RNNLSTM':
             model = new RNNShared({
-                graph: graph, session: session, nPredictions: nPredictions,
+                math: math, graph: graph, session: session, nPredictions: nPredictions,
                 hiddenSize: hiddenSize, inputSize: inputSize,
                 seqLength: seqLength,
                 init_weights: null
@@ -1080,14 +1118,6 @@ function getDeepModel({
     model.math = math;
 
     return(model);
-
-}
-
-function protoSerialize(){
-
-    debug.ids = debug.optimizer.variableNodes.forEach(
-        (node) => {console.log(node.id)});
-
 }
 
 
@@ -1102,7 +1132,6 @@ exports.dsToDeepDS = dsToDeepDS;
 exports.getDeepModel = getDeepModel;
 exports.deepTrain = deepTrain;
 exports.debug = debug;
-exports.protoSerialize = protoSerialize;
 })(
     typeof exports === 'undefined'?  this['deepmodels']={}: exports
 );
