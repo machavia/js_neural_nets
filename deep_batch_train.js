@@ -1,53 +1,27 @@
+if(typeof(require) === 'function'){
+    // TODO nodejs compat
+}else{
+ 
+    getDeepModel = deepmodels.getDeepModel;
+    prepareFeed = deepmodels.prepareFeed;
+    getOptimizer = deepmodels.getOptimizer;
+
+}
+
+
 // Start of module boilerplate, insures that code is useable both
 // on server side and client side
 (function(exports){
 
-function getOptimizer(optimizerType, learningRate, momentum){
 
-    let optimizer = null;
-
-    switch (optimizerType){
-        case 'momentum':
-            optimizer = new MomentumOptimizer(learningRate, momentum);
-            break;
-        case 'SGD':
-            optimizer = new SGDOptimizer(learningRate);
-            break;
-        case 'RMSProp':
-            optimizer = new RMSPropOptimizer(learningRate, momentum);
-            break;
-        case 'Adam':
-            optimizer = new AdamOptimizer(learningRate, momentum, 0.999);
-            break;
-        case 'Adagrad':
-            optimizer = new AdagradOptimizer(learningRate, momentum);
-            break;
-    }
-
-    return(optimizer)
-}
-
-function prepareFeed(model, xProvider, lProvider){
-
-    // return model.math.scope(() => {
-        // Maps tensors to InputProviders.
-        xFeed = {tensor: model.x, data: xProvider};
-        lFeed = {tensor: model.y, data: lProvider};
-
-        feedEntries = [xFeed, lFeed];
-
-        return(feedEntries);
-    // });
-}
-
-
-async function doBatch(
+async function doBatch({
     batchSize,
     debug,
     ds,
     feedEntries,
     feeder,
     graph,
+    iter,
     lProvider,
     learningRate,
     math,
@@ -61,7 +35,7 @@ async function doBatch(
     printInfo,
     session,
     xProvider
-){
+}){
 
     // we can chose to keep the same model / optimizer accross batches
     // or
@@ -84,7 +58,7 @@ async function doBatch(
     debug.model = model;
     debug.optimizer = optimizer;
 
-    if (feedEntries === null){
+    if (modelByBatch){
         feedEntries = prepareFeed(model, xProvider, lProvider);
     }
 
@@ -111,12 +85,10 @@ async function doBatch(
         model.cost, feedEntries, batchSize, optimizer,
         CostReduction.MEAN);
 
-    try {
-        costVal = await cost.val();
-    } catch(e){
-        console.log("Error at await", e);
-    }
-    console.log('last average cost (' + i + '): ' + costVal);
+    try { costVal = await cost.val(); }
+    catch(e){console.log("Error at await", e);}
+
+    console.log('last average cost (' + iter + '): ' + costVal);
 
     if (modelByBatch){
         modelParams.session = model.session;
@@ -128,6 +100,7 @@ async function doBatch(
         })
         model.graph.nodes = model.graph.nodes.slice(0, 0);
 
+        console.log("===> 108")
     }
 
     return([feedEntries, optimizer])
@@ -137,7 +110,7 @@ async function doBatch(
 // END of export boiler plate
 exports.doBatch = doBatch;
 })(
-    typeof exports === 'undefined'?  this['worker']={}: exports
+    typeof exports === 'undefined'?  this['deep_batch_train']={}: exports
 );
 
 

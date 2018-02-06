@@ -11,7 +11,7 @@ if(typeof(require) === 'function'){
 
 }else{
 
-    deepTrain = deepmodels.deepTrain;
+    deepTrain = deeptrain.deepTrain;
     getDeepModel = deepmodels.getDeepModel;
     dsToDeepDS = deepmodels.dsToDeepDS;
     FFN1D = deepmodels.FFN1D;
@@ -320,12 +320,15 @@ async function learnModel({
             inputSize: input_size,
             seqLength: seqLength
         };
+
+        return([modelParams, null]);
+        /*
         if (modelByBatch){
             return([modelParams, null])
         }else{
             let model = getDeepModel(modelParams);
-            return([null, model]);
-        }
+            return([modelParams, model]);
+        }*/
     }
 
     switch(model_type){
