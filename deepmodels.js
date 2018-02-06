@@ -34,7 +34,8 @@ if(typeof(require) === 'function'){
     // require('./node_modules/deeplearn/dist/deeplearn');
 
 }else{
-
+    
+    doBatch = worker.doBatch;
     ENV = deeplearn.ENV;
     AdagradOptimizer = deeplearn.AdagradOptimizer;
     AdamOptimizer = deeplearn.AdamOptimizer;
@@ -714,44 +715,6 @@ function dsToDeepDS({
     return([ds, xProvider, hProvider, cProvider, lProvider]);
 }
 
-function prepareFeed(model, xProvider, lProvider){
-
-    // return model.math.scope(() => {
-        // Maps tensors to InputProviders.
-        xFeed = {tensor: model.x, data: xProvider};
-        lFeed = {tensor: model.y, data: lProvider};
-
-        feedEntries = [xFeed, lFeed];
-
-        return(feedEntries);
-    // });
-}
-
-function getOptimizer(optimizerType, learningRate, momentum){
-
-    let optimizer = null;
-
-    switch (optimizerType){
-        case 'momentum':
-            optimizer = new MomentumOptimizer(learningRate, momentum);
-            break;
-        case 'SGD':
-            optimizer = new SGDOptimizer(learningRate);
-            break;
-        case 'RMSProp':
-            optimizer = new RMSPropOptimizer(learningRate, momentum);
-            break;
-        case 'Adam':
-            optimizer = new AdamOptimizer(learningRate, momentum, 0.999);
-            break;
-        case 'Adagrad':
-            optimizer = new AdagradOptimizer(learningRate, momentum);
-            break;
-    }
-
-    return(optimizer)
-}
-
 async function deepTrain({
     model=null,
     modelParams=null,
@@ -783,7 +746,7 @@ async function deepTrain({
         optimizer
     ] = [null, null, null, null, null, null, null, null, null]
 
-    let [ds, xProvider, hProvider, cProvider, lProvider] = [
+    let [ds, xProvider, lProvider] = [
         null, null, null, null, null
     ]
 
@@ -791,7 +754,7 @@ async function deepTrain({
         dsParameters.batchSize = batchSize;
         feeder = new Feeder(dsParameters);
     }else{
-        [ds, xProvider, hProvider, cProvider, lProvider] = dsProviders;
+        [ds, xProvider, lProvider] = dsProviders;
     }
     // !!! REMOVE
     // [ds, xProvider, hProvider, cProvider, lProvider] = dsProviders;
@@ -820,234 +783,28 @@ async function deepTrain({
     await math.scope(async () => {
 
         for (let i = 0; i < iterations; i++) {
-
-            // we can chose to keep the same model / optimizer accross batches
-            // or
-            // we can chose to have a new model / optimizer for each batch
-            if(modelByBatch){
-                if (model !== null){
-                    // conserving  the graph is bad...
-                    // modelParams.math = model.math;
-                    // modelParams.session = model.session;
-                    // modelParams.graph = model.graph;
-                    // console.log("modelParams", modelParams);
-                }
-                modelParams.math = math;
-                model = getDeepModel(modelParams);
-                feeder.math = model.math;
-                
-                [xProvider, lProvider] = feeder.next();
-
-            }
-
-            // when setting optimizer_by_batch = false with
-            // model_by_btach = false ==> error, optimizer by batch probabl
-            // keeps old refs
-            if (optimizer === null){
-                optimizer = getOptimizer(optimizerType, learningRate, momentum);
-            }
-
-            debug.xProvider = xProvider;
-            debug.lProvider = lProvider;
-            debug.model = model;
-            debug.optimizer = optimizer;
-
-            if (feedEntries === null){
-                feedEntries = prepareFeed(model, xProvider, lProvider);
-            }
-
-            // Train takes a cost tensor to minimize. Trains one batch. Returns the
-            // average cost as a Scalar.
-            if(printInfo){
-                for(let i = 0; i <= 100; i++){
-                    let input = model.x.shape.length === 1 ?
-                        Array1D.new(ds[i].input):
-                        Array2D.new(model.x.shape, ds[i].input);
-                    let target = ds[i].output; 
-                    let pred = session.eval(
-                        model.output, [{tensor: model.x, data: input}]
-                    );
-                    try {
-                        console.log("p:", pred.dataSync(), "t:", target);
-                    } catch (e){
-                        console.log("Error at dataSync", e);
-                    }
-                }
-            }
-
-
-            const cost = model.session.trainMod(
-                model.cost, feedEntries, batchSize, optimizer,
-                CostReduction.MEAN);
-
-            try {
-                costVal = await cost.val();
-            } catch(e){
-                console.log("Error at await", e);
-            }
-            console.log('last average cost (' + i + '): ' + costVal);
-
-
-            if (optimizerByBatch){
-                optimizer.cGraph.dispose()
-                optimizer.dispose();
-                optimizer = null;
-            }
-
-            if (modelByBatch){
-                /* When using feeder this does not change anything*/
-                /*
-                feeder.allocated.forEach((mat) => {
-                    if (
-                        (! mat.isDisposed)
-                    ){ mat.dispose();}})
-                model.graph.nodes.forEach((node) => {
-                    if (
-                        (node.data !== undefined) && (! node.data.isDisposed)
-                    ){
-                        model.math.disposeData(node.data.id);
-                        // node.data.dispose();
-                    }})
-
-                model.session.dispose();  // does not solve the mem leak
-                */
-
-
-                /* ND array is disposed
-                for (let b = 0; b < 64; b++){
-                    notAllDisposed = false;
-                    cx = xProvider.getNextCopy();
-                    cl = lProvider.getNextCopy();
-                    // if(! cx.isDisposed){
-                    xProvider.disposeCopy(model.math, cx);
-                    lProvider.disposeCopy(model.math, cl);
-                    console.log(cx);
-                    console.log(cl);
-                        // notAllDisposed = true;
-                    // }
-                }
-                model.math.backendEngine.activeScope.track.forEach(node => {
-                    if(! node.isDisposed){
-                        console.log(node.dataId)
-                        node.dispose()
-                    }
-                })
-                */
-
-                /*
-                xProvider.disposeCopies(model.math);
-                lProvider.disposeCopies(model.math);
-                */
-
-                modelParams.session = model.session;
-                modelParams.graph= model.graph ;
-                model.graph.nodes.forEach((node) => {
-                        if (
-                            (node.data !== undefined) && (! node.data.isDisposed)
-                        ){ node.data.dispose();}
-                })
-                model.graph.nodes = model.graph.nodes.slice(0, 0);
-
-                /*
-                model.session = null;
-                model.graph = null;
-                */
-                feedEntries = null;
-
-            }
-        } // )
-
-        /*
-
-        model.session.runtime.nodes.forEach((node) => {
-
-            if((node.data !== undefined) && (!node.data.isDisposed)){
-                node.data.dispose(); }    
-            });
-
-        if (optimizerByBatch){
-            let [countDisposed, countUndisposed] = [0, 0];
-            debugDeep.model.graph.nodes.forEach((node) => {
-                if (
-                    (node.data !== undefined) && node.data.isDisposed
-                ){ countDisposed++; }
-                else if(node.data !== undefined){ countUndisposed++;}})
-            console.log(
-                "countDisposed:", countDisposed,
-                "countUndisposed", countUndisposed
+            await doBatch(
+                batchSize,
+                debug,
+                ds,
+                feedEntries,
+                feeder,
+                graph,
+                lProvider,
+                learningRate,
+                math,
+                model,
+                modelByBatch,
+                modelParams,
+                momentum,
+                optimizer,
+                optimizerByBatch,
+                optimizerType,
+                printInfo,
+                session,
+                xProvider
             );
-        */
-
-        /*
-        for(
-            [ar_id, count] of debugDeep.model.math.registeredArrays
-        ){
-            debugDeep.model.math.disposeData(ar_id); console.log(ar_id);
         }
-        */
-
-        // let notAllDisposed = true;
-        // while (notAllDisposed){
-
-
-        /*
-        for (let b = 0; b < 64; b++){
-            notAllDisposed = false;
-            cx = xProvider.getNextCopy();
-            cl = lProvider.getNextCopy();
-            // if(! cx.isDisposed){
-            xProvider.disposeCopy(model.math, cx);
-            lProvider.disposeCopy(model.math, cl);
-            console.log(cx);
-            console.log(cl);
-                // notAllDisposed = true;
-            // }
-        for (let b = 0; b < 64; b++){
-            notAllDisposed = false;
-            cx = debug.xProvider.getNextCopy();
-            cl = lProvider.getNextCopy();
-            // if(! cx.isDisposed){
-            debug.xProvider.disposeCopy(model.math, cx);
-            debug.lProvider.disposeCopy(model.math, cl);
-            console.log(cx);
-            console.log(cl);
-                // notAllDisposed = true;
-            // }
-        }
-
-        debugDeep.model.graph.nodes.forEach((node) => {
-            if (
-                (node.data !== undefined) && (! node.data.isDisposed)
-            ){ node.data.dispose();}})
-
-        // session.dispose();  // does not solve the mem leak
-        // optimizer.dispose();
-        // graph = null;
-
-
-        // ok, now this work but does produce errors
-        /*
-        model.session.math.backend.gpgpu.deleteProgram()
-        model.session.math.backend.gpgpu.deleteMatrixTexture()
-        model.session.math.backend.gpgpu.dispose()
-        model.session.math.backend.gpgpu = new GPGPUContext()
-        */
-
-        /*
-        [countDisposed, countUndisposed] = [0, 0];
-        debugDeep.model.graph.nodes.forEach((node) => {
-            if (
-                (node.data !== undefined) && node.data.isDisposed
-            ){ countDisposed++; }
-            else if(node.data !== undefined){ countUndisposed++;}})
-        console.log(
-            "countDisposed:", countDisposed,
-            "countUndisposed", countUndisposed
-        );
-        */
-
-
-        // }
     })
 
     // modelParams.session.dispose();

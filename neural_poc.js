@@ -12,7 +12,7 @@ debugDeep = deepmodels.debug;
 
 window.onload = function(){
 
-    new SharedWorker('worker.js');
+    // new SharedWorker('worker.js');
 
     let ret = speedTest(100);
 
