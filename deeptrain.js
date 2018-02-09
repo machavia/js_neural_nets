@@ -131,7 +131,7 @@ async function deepTrain({
                 model = null;
             }
 
-            await doBatch({
+            let args = {
                 batchSize: batchSize,
                 debug: debug,
                 ds: ds,
@@ -151,8 +151,75 @@ async function deepTrain({
                 optimizerType: optimizerType,
                 printInfo: printInfo,
                 session: session,
-                xProvider
-            })
+                xProvider: xProvider
+            }
+
+
+            /*
+            optimizer
+                accumulatedSquaredGradients 
+
+            deeptrain.debug.optimizer.accumulatedSquaredGradients.dict
+            // math deeptrain.debug.model.math.backend.data.dict[3]
+            */
+
+            /* ------>
+            gradientsDict = deeptrain.debug.optimizer.
+                accumulatedSquaredGradients.dict;
+            data = deeptrain.debug.model.math.backend.data
+
+            sharedVariables = deeptrain.debug.model.sharedVariables;
+            
+            for(gradientsVar of Object.values(gradientsDict)){
+                console.log(gradientsVar);
+                let gradientsVal = data[gradientsVar.dataId];
+                console.log(gradientsVal)
+                isSameSize = gradientsVar.size == gradientsVal.length;
+                if(! isSameSize){
+                    console.log(
+                        "not the same size",
+                        gradientsVar.size,
+                        gradientsVal.length
+                    )
+                    break;
+                }
+            }
+            */
+
+            // <-----
+
+            ret = await doBatch(args);
+            [feedEntries, optimizer, model] = ret;
+
+            debug.feedEntries = feedEntries;
+            debug.optimizer = optimizer;
+            debug.model = model;
+
+            /*
+            if(modelByBatch && optimizerByBatch){
+
+                console.log("ABOOT")
+
+                wk = new Worker('./deep_batch_train.js');
+
+                console.log("BEN'D'LA MERDE");
+                args.deepmodels = deepmodels;
+                console.log("BEN'CON");
+                ret = wk.postMessage(args);
+                console.log("BEN'ZUT");
+
+                console.log(ret);
+
+                wk.terminate();
+
+                console.log("A-BOOT")
+
+            }
+            else{
+                await doBatch(args)
+            }
+            */
+
         }
     })
 
@@ -163,6 +230,7 @@ var debug = {}
 // END of export boiler plate
 exports.deepTrain = deepTrain;
 exports.debug = debug;
+exports.deep_batch_train = deep_batch_train;
 })(
     typeof exports === 'undefined'?  this['deeptrain']={}: exports
 );

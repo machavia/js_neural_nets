@@ -354,9 +354,10 @@ class LSTMCellShared{
     constructor({
         math,
         graph, input_size=2, hidden_size=3, nPredictions=1,
-        x=null, h_tm1=null, c_tm1=null, add_cost=true, sharedVariables=null
+        x=null, h_tm1=null, c_tm1=null, add_cost=true, sharedVariables=null,
+        weightValues=null
     }){
-        this.sharedVariables = sharedVariables;
+        this.weights = sharedVariables;
         this.input_size = input_size;
         this.hidden_size = hidden_size;
 
@@ -365,33 +366,44 @@ class LSTMCellShared{
 
         let Wi, bi, Wf, bf, Wc, bc, Wo, bo, Wout, bout;
 
-        if (this.sharedVariables !== null){
-            //
+        if (this.weights !== null){
+            // set variables (i.e. containers)
             [[Wi, bi], [Wf, bf], [Wc, bc], [Wo, bo], [Wout, bout]] = [
-                this.sharedVariables['i'], this.sharedVariables['f'],
-                this.sharedVariables['c'], this.sharedVariables['o'],
-                this.sharedVariables['out']
+                this.weights['i'], this.weights['f'],
+                this.weights['c'], this.weights['o'],
+                this.weights['out']
             ];
 
+            // set initial values
             let setValues = [];
             let vars = [Wi, bi, Wf, bf, Wc, bc, Wo, bo, Wout, bout];
 
+        }
+        
+        if(weightValues !== null){
             [
                 Wi_i, bi_i, 
                 Wf_i, bf_i, 
                 Wc_i, bc_i,
                 Wo_i, bo_i,
                 Wout_i, bout_i
-            ] = setValues;
-
-        }else{
-            [bi_i, bf_i, bc_i, bo_i, bout_i] = [
-                null, null, null, null, null 
+            ] = weightValues;
+        }
+        else{
+            [
+                Wi_i, bi_i, 
+                Wf_i, bf_i, 
+                Wc_i, bc_i,
+                Wo_i, bo_i,
+                Wout_i, bout_i
+            ] = [
+                null, null,   
+                null, null,   
+                null, null,   
+                null, null,   
+                null, null,   
             ];
 
-            [Wi_i, Wf_i, Wc_i, Wo_i, Wout_i] = [
-                null, null, null, null, null 
-            ];
         }
 
         this.x = x === null ?
@@ -515,6 +527,24 @@ class LSTMCellShared{
 
     }
 
+    getWeights(session){
+        let weights = {};
+        for (let [k, v] of Object.entries(this.weights)){
+            let w_b = session.evalAll(v);
+            let val = []
+            for (let x of w_b){
+                let ar;
+                if (x.shape.length > 1){
+                    ar = new Array2D.new(x.shape, x.dataSync());
+                }else{
+                    ar = new Array1D.new(x.dataSync());
+                }
+                val.push(ar);
+            }
+            weights[k] = val;
+        }
+        return(weights);
+    }
 }
 
 class RNNShared{
@@ -577,7 +607,7 @@ class RNNShared{
             }
 
             if (this.sharedVariables === null){
-                this.sharedVariables = cell.sharedVariables;
+                this.sharedVariables = cell.weights;
             }
 
             this.cells.push(cell)

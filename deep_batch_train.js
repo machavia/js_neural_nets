@@ -1,3 +1,9 @@
+function onMessage(e) {
+    console.log("A BUTT");
+    postMessage(e.data);
+}
+
+/*
 if(typeof(require) === 'function'){
     // TODO nodejs compat
 }else{
@@ -7,6 +13,7 @@ if(typeof(require) === 'function'){
     getOptimizer = deepmodels.getOptimizer;
 
 }
+*/
 
 
 // Start of module boilerplate, insures that code is useable both
@@ -58,6 +65,8 @@ async function doBatch({
     debug.model = model;
     debug.optimizer = optimizer;
 
+    console.log(model, optimizer);
+
     if (modelByBatch){
         feedEntries = prepareFeed(model, xProvider, lProvider);
     }
@@ -100,10 +109,9 @@ async function doBatch({
         })
         model.graph.nodes = model.graph.nodes.slice(0, 0);
 
-        console.log("===> 108")
     }
 
-    return([feedEntries, optimizer])
+    return([feedEntries, optimizer, model]);
 }
 
 
@@ -112,14 +120,6 @@ exports.doBatch = doBatch;
 })(
     typeof exports === 'undefined'?  this['deep_batch_train']={}: exports
 );
-
-
-
-onconnect = function(e) {
-
-
-
-}
 
 
 
