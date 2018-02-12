@@ -109,6 +109,7 @@ async function deepTrain({
     } // else{ math = model.math; }
     // math.enableDebugMode();
 
+    // weights =
     await math.scope(async () => {
 
         if(! modelByBatch){
@@ -154,7 +155,6 @@ async function deepTrain({
                 xProvider: xProvider
             }
 
-
             /*
             optimizer
                 accumulatedSquaredGradients 
@@ -164,12 +164,11 @@ async function deepTrain({
             */
 
             /* ------>
+            optimizer = deeptrain.debug.optimizer;
             gradientsDict = deeptrain.debug.optimizer.
                 accumulatedSquaredGradients.dict;
             data = deeptrain.debug.model.math.backend.data
 
-            sharedVariables = deeptrain.debug.model.sharedVariables;
-            
             for(gradientsVar of Object.values(gradientsDict)){
                 console.log(gradientsVar);
                 let gradientsVal = data[gradientsVar.dataId];
@@ -186,7 +185,6 @@ async function deepTrain({
             }
             */
 
-            // <-----
 
             ret = await doBatch(args);
             [feedEntries, optimizer, model] = ret;
@@ -194,6 +192,48 @@ async function deepTrain({
             debug.feedEntries = feedEntries;
             debug.optimizer = optimizer;
             debug.model = model;
+            debug.weights = model.getWeightsValues();
+
+            // Set proxy variables
+            gradientsDict = optimizer.
+                accumulatedSquaredGradients.dict;
+            data = model.math.backend.data
+
+            // get Square Gradients A and variables values with Names
+            /*
+            let vIds = [];
+            console.log("====================================================")
+            for(node of optimizer.variableNodes){
+                console.log(node.name)
+                console.log(node)
+                let sqGradForNode = gradientsDict[node.id]
+                console.log("==> SqGradNode", sqGradForNode);
+                console.log("==> sqGradValue", data[sqGradForNode.dataId]);
+                console.log("==> Value", data[node.data.dataId]);
+            }
+            */
+
+
+            // get Gradient Values A (no names)
+            /*
+            for(
+                [gradientsName, gradientsVar] of Object.entries(gradientsDict)
+            ){
+                console.log(gradientsName);
+                console.log(gradientsVar);
+                let gradientsVal = data[gradientsVar.dataId];
+                console.log(gradientsVal)
+                isSameSize = gradientsVar.size == gradientsVal.length;
+                if(! isSameSize){
+                    console.log(
+                        "not the same size",
+                        gradientsVar.size,
+                        gradientsVal.length
+                    )
+                    break;
+                }
+            }
+            */
 
             /*
             if(modelByBatch && optimizerByBatch){
@@ -221,6 +261,8 @@ async function deepTrain({
             */
 
         }
+
+        // return(weights);
     })
 
 }

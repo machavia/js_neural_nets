@@ -65,7 +65,7 @@ async function doBatch({
     debug.model = model;
     debug.optimizer = optimizer;
 
-    console.log(model, optimizer);
+    // console.log(model, optimizer);
 
     if (modelByBatch){
         feedEntries = prepareFeed(model, xProvider, lProvider);
@@ -99,6 +99,7 @@ async function doBatch({
 
     console.log('last average cost (' + iter + '): ' + costVal);
 
+    /*
     if (modelByBatch){
         modelParams.session = model.session;
         modelParams.graph= model.graph ;
@@ -108,8 +109,8 @@ async function doBatch({
             ){ node.data.dispose();}
         })
         model.graph.nodes = model.graph.nodes.slice(0, 0);
-
     }
+    */
 
     return([feedEntries, optimizer, model]);
 }

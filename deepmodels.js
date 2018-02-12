@@ -75,18 +75,26 @@ function addDense(
     math,
     graph, name, x, units,
     activation, useBias = true,
-    kernelInitializer = null,
-    biasInitializer = null,
+    kernelInitValue = null,
+    biasInitValue = null,
     kernelVariable = null,
     biasVariable = null
 ){
-
-    if (kernelInitializer === null){
+    let [kernelInitializer, biasInitializer] = [null, null];
+    if (kernelInitValue === null){
          kernelInitializer = math.scope(() => {
              return(new VarianceScalingInitializer())});
+    }else{
+         kernelInitializer = math.scope(() => {
+             return(new NDArrayInitializer(
+                Array2D.new([x.shape[0], units], kernelInitValue)))});
     }
-    if (biasInitializer === null){
+    if (biasInitValue === null){
         biasInitializer = math.scope(() => {return(new ZerosInitializer())});
+    }else{
+        biasInitializer = math.scope(() => {
+            return(new NDArrayInitializer(
+                Array1D.new(biasInitValue)))});
     }
     const weights = kernelVariable === null ?
         graph.variable(
@@ -329,7 +337,7 @@ class LSTMCell{
 
     }
 
-    getWeights(session){
+    getWeightsValuesSync(session){
         let weights = {};
         for (let [k, v] of Object.entries(this.weights)){
             let w_b = session.evalAll(v);
@@ -347,6 +355,7 @@ class LSTMCell{
         }
         return(weights);
     }
+
 }
 
 
@@ -354,12 +363,16 @@ class LSTMCellShared{
     constructor({
         math,
         graph, input_size=2, hidden_size=3, nPredictions=1,
-        x=null, h_tm1=null, c_tm1=null, add_cost=true, sharedVariables=null,
+        x=null, h_tm1=null, c_tm1=null, add_cost=true,
+        sharedVariables=null,
         weightValues=null
     }){
+        this.math = math;
+        this.graph = graph;
         this.weights = sharedVariables;
         this.input_size = input_size;
         this.hidden_size = hidden_size;
+        this.hasCost = add_cost;
 
         let bi_i, bf_i, bc_i, bo_i, bout_i;
         let Wi_i, Wf_i, Wc_i, Wo_i, Wout_i;
@@ -369,15 +382,31 @@ class LSTMCellShared{
         if (this.weights !== null){
             // set variables (i.e. containers)
             [[Wi, bi], [Wf, bf], [Wc, bc], [Wo, bo], [Wout, bout]] = [
-                this.weights['i'], this.weights['f'],
-                this.weights['c'], this.weights['o'],
-                this.weights['out']
+                this.weights['i'],
+                this.weights['f'],
+                this.weights['c'],
+                this.weights['o'],
+                [null, null] // shared variables except for output
             ];
 
             // set initial values
             let setValues = [];
             let vars = [Wi, bi, Wf, bf, Wc, bc, Wo, bo, Wout, bout];
 
+        }else{
+            [
+                Wi, bi, 
+                Wf, bf, 
+                Wc, bc,
+                Wo, bo,
+                Wout, bout
+            ] = [
+                null, null,
+                null, null,
+                null, null,
+                null, null,
+                null, null
+            ];
         }
         
         if(weightValues !== null){
@@ -391,17 +420,17 @@ class LSTMCellShared{
         }
         else{
             [
-                Wi_i, bi_i, 
-                Wf_i, bf_i, 
+                Wi_i, bi_i,
+                Wf_i, bf_i,
                 Wc_i, bc_i,
                 Wo_i, bo_i,
                 Wout_i, bout_i
             ] = [
-                null, null,   
-                null, null,   
-                null, null,   
-                null, null,   
-                null, null,   
+                null, null,
+                null, null,
+                null, null,
+                null, null,
+                null, null   
             ];
 
         }
@@ -431,7 +460,7 @@ class LSTMCellShared{
             graph,
             'i', XHC_prev, hidden_size,
             (x) => graph.sigmoid(x), true,
-            null, null, Wi_i, bi_i
+            Wi_i, bi_i, Wi, bi
             );
              // graph.layers.dense
 
@@ -440,7 +469,7 @@ class LSTMCellShared{
             graph,
             'f', XHC_prev, hidden_size,
             (x) => graph.sigmoid(x), true,
-            null, null, Wf_i, bf_i
+            Wf_i, bf_i, Wf, bf
             );
             // graph.layers.dense
 
@@ -450,7 +479,7 @@ class LSTMCellShared{
             graph,
             'c_half', XH, hidden_size,
             (x) => graph.tanh(x), true,
-            null, null, Wc_i, bc_i
+            Wc_i, bc_i, Wc, bc
             )
             //graph.layers.dense
         this.c = graph.add(
@@ -467,14 +496,14 @@ class LSTMCellShared{
             graph,
             'o', XHC, hidden_size,
             (x) => graph.sigmoid(x), true,
-            null, null, Wo_i, bo_i
+            Wo_i, bo_i, Wo, bo 
             );
             // graph.layers.dense
 
         // define h
         this.h = graph.multiply(this.o, graph.tanh(this.c));
 
-        [this.Wout, this.bout] = [null, null];
+        // [this.Wout, this.bout] = [null, null];
 
         if (add_cost){
 
@@ -483,12 +512,12 @@ class LSTMCellShared{
                 graph,
                 'classif', this.h, nPredictions,
                 (x) => graph.sigmoid(x), true,
-                null, null, null, null 
+                Wout_i,bout_i, Wout, bout
                 );
                 // graph.layers.dense
             //
             const EPSILON = 1e-7;
-            
+
             const arrayOne = math.scope(() => {return(Array1D.new([1]));})
             const arrayMOne = math.scope(() => {return(Array1D.new([-1]));})
             const eps = math.scope(() => {return(Array1D.new([EPSILON]));})
@@ -527,7 +556,7 @@ class LSTMCellShared{
 
     }
 
-    getWeights(session){
+    getWeightsValuesSync(session){
         let weights = {};
         for (let [k, v] of Object.entries(this.weights)){
             let w_b = session.evalAll(v);
@@ -545,14 +574,38 @@ class LSTMCellShared{
         }
         return(weights);
     }
+
+    getWeightsValues(){
+        let data = this.math.backend.data;
+        let weights = [];
+        let layers = ['i', 'f', 'c', 'o'];
+        if (this.hasCost){
+            layers.push('out');
+        }
+        for(let layer of layers){
+            // push weight mat
+            weights.push(
+                data[this.weights[layer][0].node.data.dataId]);
+            // push bias
+            weights.push(
+                data[this.weights[layer][1].node.data.dataId]);
+        }
+        if (! this.hasCost){
+            weights.push(null);
+            weights.push(null);
+        }
+        return(weights);
+    }
+
 }
 
 class RNNShared{
 
     constructor({
         math, graph, session, inputSize=2, hiddenSize=3, nPredictions=1,
-        cellClass=LSTMCellShared, seqLength=10, init_weights=null,
-        sharedVariables=null
+        cellClass=LSTMCellShared, seqLength=10,
+        sharedVariables=null,
+        weightValues=null
     }){
 
         // this.h_t0 = graph.placeholder('h_t0', [hiddenSize]);
@@ -562,7 +615,8 @@ class RNNShared{
         this.x = graph.placeholder('x', [seqLength, inputSize]);
         this.xs = [];
         this.cells = [];
-        this.sharedVariables = init_weights;
+        this.sharedVariables = sharedVariables;
+        this.sharedWeightValues = weightValues;
         let [c_tm1, h_tm1] = [null, null];
 
         for(let i = 0; i < seqLength; i++){
@@ -593,6 +647,7 @@ class RNNShared{
                 h_tm1: h_tm1, c_tm1: c_tm1,
                 add_cost: add_cost,
                 sharedVariables: this.sharedVariables,
+                weightValues: null,
                 x: this.xs[i]
             });
 
@@ -606,12 +661,22 @@ class RNNShared{
                 this.cost = cell.cost;
             }
 
-            if (this.sharedVariables === null){
-                this.sharedVariables = cell.weights;
-            }
+            // will keep weight of the last cell to date
+            //if (this.sharedVariables === null){
+            this.sharedVariables = cell.weights;
+            this.sharedWeightValues = cell.getWeightsValues();
+            // }
+
+            // console.log(this.sharedVariables)
+            // console.log(this.sharedWeightValues)
 
             this.cells.push(cell)
         }
+    }
+
+    getWeightsValues(){
+        let weights = this.cells[this.cells.length - 1].getWeightsValues();
+        return( weights );
     }
 }
 
@@ -737,7 +802,7 @@ function getDeepModel({
                 math: math, graph: graph, session: session, nPredictions: nPredictions,
                 hiddenSize: hiddenSize, inputSize: inputSize,
                 seqLength: seqLength,
-                init_weights: null
+                weightValues: null
             });
             break;
         case 'LSTM':
@@ -746,7 +811,7 @@ function getDeepModel({
                 graph: graph, session: session, nPredictions: outputSize,
                 hiddenSize: hiddenSize, inputSize: inputSize,
                 seqLength: 1,
-                init_weights: null
+                weightValues: null
             });
             break;
         case 'FFN1D':
