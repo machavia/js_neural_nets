@@ -15,20 +15,19 @@ if(typeof(require) === 'function'){
         InGPUMemoryShuffledInputProviderBuilder
     } = require('./deeplearn')
 
-    // require('./node_modules/deeplearn/dist/deeplearn')
-
-    // require('./node_modules/deeplearn/dist/deeplearn');
-
 }else{
     
     doBatch = deep_batch_train.doBatch;
+    doBatchFromScratch = deep_batch_train.doBatchFromScratch;
     setOptimizerParams = deep_batch_train.setOptimizerParams;
     getOptimizerParams = deep_batch_train.getOptimizerParams;
+
     Feeder = deepmodels.Feeder;
     prepareFeed = deepmodels.prepareFeed;
     getOptimizer = deepmodels.getOptimizer;
     getDeepModel = deepmodels.getDeepModel;
     Feeder = deepmodels.Feeder;
+
     ENV = deeplearn.ENV;
     Array1D = deeplearn.Array1D;
     Array2D = deeplearn.Array2D;
@@ -40,7 +39,6 @@ if(typeof(require) === 'function'){
     NDArray = deeplearn.NDArray;
     NDArrayMath = deeplearn.NDArrayMath;
     InCPUMemoryShuffledInputProviderBuilder = deeplearn.InCPUMemoryShuffledInputProviderBuilder;
-    InCPUMemoryShuffledInputProviderBuilderExtended = deeplearn.InCPUMemoryShuffledInputProviderBuilderExtended;
     InGPUMemoryShuffledInputProviderBuilder = deeplearn.InGPUMemoryShuffledInputProviderBuilder;
 
 }
@@ -48,8 +46,6 @@ if(typeof(require) === 'function'){
 // Start of module boilerplate, insures that code is useable both
 // on server side and client side
 (function(exports){
-
-
 
 async function deepTrain({
     model=null,
@@ -65,7 +61,6 @@ async function deepTrain({
     optimizerByBatch=false,
     modelByBatch=false
 }){
-
 
     // Houston we have a memory leak !
     // Only GPU ?
@@ -86,30 +81,25 @@ async function deepTrain({
         null, null, null, null, null
     ]
 
+
+    if (model === null){
+        deeplearn.ENV.setMath(new deeplearn.NDArrayMath('cpu', true))
+        math = ENV.math;
+        // math.enableDebugMode();
+    }
+
     if (modelByBatch){
         dsParameters.batchSize = batchSize;
         feeder = new Feeder(dsParameters);
     }else{
         [ds, xProvider, , , lProvider] = dsProviders;
     }
-    // !!! REMOVE
-    // [ds, xProvider, hProvider, cProvider, lProvider] = dsProviders;
-
-    debug.ds = dsParameters;
-    debug.xProvider = xProvider;
-    debug.lProvider = lProvider;
-    debug.model = model;
-    debug.ENV = ENV;
 
     // inject session with our modified version of train
     // maybe using bind to add the session context to the function ?
     // Ok rather than craping our pants here we will just modify the original
     // code...
 
-    if (model === null){
-        deeplearn.ENV.setMath(new deeplearn.NDArrayMath('cpu', false))
-        math = ENV.math;
-    }
     // else{ math = model.math; }
     // math.enableDebugMode();
 
@@ -140,62 +130,35 @@ async function deepTrain({
                 modelParams["init_weights"] = weightInit;
             }
 
-            let args = {
-                batchSize: batchSize,
-                debug: debug,
-                ds: ds,
-                feedEntries: feedEntries,
-                feeder: feeder,
-                graph: graph,
-                iter: iter,
-                lProvider: lProvider,
-                learningRate: learningRate,
-                math: math,
-                model: model,
-                modelByBatch: modelByBatch,
-                modelParams: modelParams,
-                momentum: momentum,
-                optimizer: optimizer,
-                optimizerByBatch: optimizerByBatch,
-                optimizerType: optimizerType,
-                printInfo: printInfo,
-                session: session,
-                xProvider: xProvider,
-                optimizerParams: optimizerParams
+            let args = {};
+            let batchFunc = null;
+            if (modelByBatch && optimizerByBatch){
+                args = {
+                    batchSize: batchSize,
+                    feedEntries: feedEntries,
+                    iter: iter,
+                    model: model,
+                    optimizer: optimizer,
+                    session: session
+                };
+                batchFunc = doBatchFromScratch;
+            }
+            else{
+                args = {
+                    batchSize: batchSize,
+                    feeder: feeder,
+                    iter: iter,
+                    learningRate: learningRate,
+                    model: model,
+                    modelParams: modelParams,
+                    momentum: momentum,
+                    optimizerType: optimizerType,
+                    optimizerParams: optimizerParams
+                };
+                batchFunc = doBatch;
             }
 
-            /*
-            optimizer
-                accumulatedSquaredGradients 
-
-            deeptrain.debug.optimizer.accumulatedSquaredGradients.dict
-            // math deeptrain.debug.model.math.backend.data.dict[3]
-            */
-
-            /* ------>
-            optimizer = deeptrain.debug.optimizer;
-            gradientsDict = deeptrain.debug.optimizer.
-                accumulatedSquaredGradients.dict;
-            data = deeptrain.debug.model.math.backend.data
-
-            for(gradientsVar of Object.values(gradientsDict)){
-                console.log(gradientsVar);
-                let gradientsVal = data[gradientsVar.dataId];
-                console.log(gradientsVal)
-                isSameSize = gradientsVar.size == gradientsVal.length;
-                if(! isSameSize){
-                    console.log(
-                        "not the same size",
-                        gradientsVar.size,
-                        gradientsVal.length
-                    )
-                    break;
-                }
-            }
-            */
-
-
-            ret = await doBatch(args);
+            ret = await batchFunc(args);
             [feedEntries, optimizer, model] = ret;
 
             if(modelByBatch && optimizerByBatch){
@@ -204,77 +167,16 @@ async function deepTrain({
                 optimizerParams = getOptimizerParams(optimizer, data);
             }
 
+            /*
             debug.feedEntries = feedEntries;
             debug.optimizer = optimizer;
             debug.model = model;
             debug.weights = model.getWeightsValues();
             debug.optimizerParams = optimizerParams;
-
-
-            // get Square Gradients A and variables values with Names
-            /*
-            let vIds = [];
-            console.log("====================================================")
-            for(node of optimizer.variableNodes){
-                console.log(node.name)
-                console.log(node)
-                let sqGradForNode = gradientsDict[node.id]
-                console.log("==> SqGradNode", sqGradForNode);
-                console.log("==> sqGradValue", data[sqGradForNode.dataId]);
-                console.log("==> Value", data[node.data.dataId]);
-            }
-            */
-
-
-            // get Gradient Values A (no names)
-            /*
-            for(
-                [gradientsName, gradientsVar] of Object.entries(gradientsDict)
-            ){
-                console.log(gradientsName);
-                console.log(gradientsVar);
-                let gradientsVal = data[gradientsVar.dataId];
-                console.log(gradientsVal)
-                isSameSize = gradientsVar.size == gradientsVal.length;
-                if(! isSameSize){
-                    console.log(
-                        "not the same size",
-                        gradientsVar.size,
-                        gradientsVal.length
-                    )
-                    break;
-                }
-            }
-            */
-
-            /*
-            if(modelByBatch && optimizerByBatch){
-
-                console.log("ABOOT")
-
-                wk = new Worker('./deep_batch_train.js');
-
-                console.log("BEN'D'LA MERDE");
-                args.deepmodels = deepmodels;
-                console.log("BEN'CON");
-                ret = wk.postMessage(args);
-                console.log("BEN'ZUT");
-
-                console.log(ret);
-
-                wk.terminate();
-
-                console.log("A-BOOT")
-
-            }
-            else{
-                await doBatch(args)
-            }
             */
 
         }
 
-        // return(weights);
     })
 
 }
@@ -288,18 +190,3 @@ exports.deep_batch_train = deep_batch_train;
 })(
     typeof exports === 'undefined'?  this['deeptrain']={}: exports
 );
-
-
-/*
-deeplearn.ENV.getBackend("cpu")
-deeplearn.NDArrayMathCPU
-
-// Everything ever tracked is here:
-debugDeep.model.math.backendEngine.activeScope.track.forEach(node => {
-    if(! node.isDisposed){
-        console.log(node.dataId)
-        node.dispose()
-    }
-})
-
-*/

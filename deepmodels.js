@@ -25,13 +25,10 @@ if(typeof(require) === 'function'){
         InGPUMemoryShuffledInputProviderBuilder
     } = require('./deeplearn')
 
-    // require('./node_modules/deeplearn/dist/deeplearn')
-
     const {
         Initializer, VarianceScalingInitializer, ZerosInitializer,
         NDArrayInitializer
     } = require('./deeplearn')
-    // require('./node_modules/deeplearn/dist/deeplearn');
 
 }else{
     
@@ -800,7 +797,7 @@ class Feeder{
 
             // Shuffles inputs and labels and keeps them mutually in sync.
             shuffledInputProviderBuilder =
-                new InCPUMemoryShuffledInputProviderBuilderExtended(toGet);
+                new InCPUMemoryShuffledInputProviderBuilder(toGet);
 
             // debug.shuffledInputProvider = shuffledInputProviderBuilder;
 

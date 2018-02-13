@@ -1,21 +1,3 @@
-function onMessage(e) {
-    console.log("A BUTT");
-    postMessage(e.data);
-}
-
-/*
-if(typeof(require) === 'function'){
-    // TODO nodejs compat
-}else{
- 
-    getDeepModel = deepmodels.getDeepModel;
-    prepareFeed = deepmodels.prepareFeed;
-    getOptimizer = deepmodels.getOptimizer;
-
-}
-*/
-
-
 // Start of module boilerplate, insures that code is useable both
 // on server side and client side
 (function(exports){
@@ -47,83 +29,60 @@ function setOptimizerParams(optimizer, nameToParamValue, data){
 
 }
 
-
-async function doBatch({
+async function doBatchFromScratch(
     batchSize,
-    debug,
-    ds,
-    feedEntries,
     feeder,
-    graph,
     iter,
-    lProvider,
     learningRate,
-    math,
     model,
-    modelByBatch,
     modelParams,
     momentum,
-    optimizer,
-    optimizerByBatch,
     optimizerType,
-    printInfo,
-    session,
-    xProvider,
     optimizerParams=null
-}){
+){
 
-    // we can chose to keep the same model / optimizer accross batches
-    // or
-    // we can chose to have a new model / optimizer for each batch
-    if(modelByBatch){
+    let model = getDeepModel(modelParams);
+    feeder.math = model.math;
+    [xProvider, lProvider] = feeder.next();
 
-        model = getDeepModel(modelParams);
+    optimizer = getOptimizer(optimizerType, learningRate, momentum);
 
-        console.log("init_weights:", modelParams.init_weights)
-
-        feeder.math = model.math;
-        [xProvider, lProvider] = feeder.next();
-    }
-
-    // when setting optimizer_by_batch = false with
-    // model_by_btach = false ==> error, optimizer by batch probably
-    // keeps old refs
-    if (optimizerByBatch){
-        optimizer = getOptimizer(optimizerType, learningRate, momentum);
-    }
-
-    // console.log(model, optimizer);
-    if (modelByBatch){
-        feedEntries = prepareFeed(model, xProvider, lProvider);}
-
-    // Train takes a cost tensor to minimize. Trains one batch. Returns the
-    // average cost as a Scalar.
-    if(printInfo){
-        for(let i = 0; i <= 100; i++){
-            let input = model.x.shape.length === 1 ?
-                Array1D.new(ds[i].input):
-                Array2D.new(model.x.shape, ds[i].input);
-            let target = ds[i].output; 
-            let pred = session.eval(
-                model.output,
-                [{tensor: model.x, data: input}]
-            );
-            try {
-                console.log("p:", pred.dataSync(), "t:", target);
-            } catch (e){
-                console.log("Error at dataSync", e);
-            }
-        }
-    }
+    let feedEntries = prepareFeed(model, xProvider, lProvider);
 
     let [runtime, feed] = model.session.trainModStart(
         model.cost, feedEntries, batchSize, optimizer)
 
     let data = model.math.backend.data;
-    if(modelByBatch && optimizerParams !== null){
-        setOptimizerParams(optimizer, optimizerParams, data);
-    }
-    console.log(getOptimizerParams(optimizer, data))
+
+    if(optimizerParams !== null){
+        setOptimizerParams(optimizer, optimizerParams, data);}
+
+    const cost = model.session.trainModEnd(
+        runtime, feed, model.cost, batchSize, optimizer, CostReduction.MEAN)
+
+    try { costVal = await cost.val(); }
+    catch(e){console.log("Error at await", e);}
+
+    console.log('last average cost (' + iter + '): ' + costVal);
+
+    return([feedEntries, optimizer, model]);
+}
+
+async function doBatch({
+    batchSize,
+    feedEntries,
+    iter,
+    model,
+    momentum,
+    optimizer,
+    session,
+}){
+
+
+    let [runtime, feed] = model.session.trainModStart(
+        model.cost, feedEntries, batchSize, optimizer)
+
+    let data = model.math.backend.data;
 
     const cost = model.session.trainModEnd(
         runtime, feed, model.cost, batchSize, optimizer, CostReduction.MEAN)
@@ -135,8 +94,6 @@ async function doBatch({
 
     /*
     if (modelByBatch){
-        modelParams.session = model.session;
-        modelParams.graph= model.graph ;
         model.graph.nodes.forEach((node) => {
             if (
                 (node.data !== undefined) && (! node.data.isDisposed)
@@ -148,6 +105,27 @@ async function doBatch({
 
     return([feedEntries, optimizer, model]);
 }
+
+async function doCost(model, ds, session){
+    // Train takes a cost tensor to minimize. Trains one batch. Returns the
+    // average cost as a Scalar.
+    for(let i = 0; i <= 100; i++){
+        let input = model.x.shape.length === 1 ?
+            Array1D.new(ds[i].input):
+            Array2D.new(model.x.shape, ds[i].input);
+        let target = ds[i].output; 
+        let pred = session.eval(
+            model.output,
+            [{tensor: model.x, data: input}]
+        );
+        try {
+            console.log("p:", pred.dataSync(), "t:", target);
+        } catch (e){
+            console.log("Error at dataSync", e);
+        }
+    }
+}
+
 
 
 // END of export boiler plate
