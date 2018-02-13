@@ -602,8 +602,14 @@ class LSTMCellShared{
 class RNNShared{
 
     constructor({
-        math, graph, session, inputSize=2, hiddenSize=3, nPredictions=1,
-        cellClass=LSTMCellShared, seqLength=10,
+        math,
+        graph,
+        session,
+        inputSize=2,
+        hiddenSize=3,
+        nPredictions=1,
+        cellClass=LSTMCellShared,
+        seqLength=10,
         sharedVariables=null,
         weightValues=null
     }){
@@ -640,14 +646,53 @@ class RNNShared{
                 h_tm1 = this.h_t0;
             }
 
+            // if we have weightValues we will use for the first
+            // one and the last cells (for output weights) only
+            let weightValuesIter = [];
+            let sharedVariablesIter = [];
+            if(weightValues !== null){
+                if(i === 0){
+                    sharedVariablesIter = null;
+                    weightValuesIter = this.sharedWeightValues.slice(0, 8);
+                    weightValuesIter.push(null);
+                    weightValuesIter.push(null);
+                }
+                else if(i === (seqLength - 1)){
+                    // sharedVariables is a dictionnary not an array...
+                    sharedVariablesIter = {};
+                    for( let layer of ['i', 'c', 'f', 'o'] ){
+                        sharedVariablesIter[layer] =
+                            this.sharedVariables[layer];
+                    }
+                    sharedVariablesIter['out'] = [null, null];
+                    weightValuesIter = [
+                        null, null,
+                        null, null,
+                        null, null,
+                        null, null
+                    ];
+                    weightValuesIter.push(this.sharedWeightValues[8]);
+                    weightValuesIter.push(this.sharedWeightValues[9]);
+    
+                }
+                else{
+                    weightValuesIter = null;
+                    sharedVariablesIter = this.sharedVariables;
+                }
+            }
+            else{
+                sharedVariablesIter = this.sharedVariables;
+                weightValuesIter = null;
+            }
+
             let cell = new cellClass({
                 math,
                 graph, input_size: inputSize, hidden_size: hiddenSize,
                 nPredictions: nPredictions,
                 h_tm1: h_tm1, c_tm1: c_tm1,
                 add_cost: add_cost,
-                sharedVariables: this.sharedVariables,
-                weightValues: null,
+                sharedVariables: sharedVariablesIter,
+                weightValues: weightValuesIter,
                 x: this.xs[i]
             });
 
@@ -664,7 +709,7 @@ class RNNShared{
             // will keep weight of the last cell to date
             //if (this.sharedVariables === null){
             this.sharedVariables = cell.weights;
-            this.sharedWeightValues = cell.getWeightsValues();
+            // this.sharedWeightValues = cell.getWeightsValues();
             // }
 
             // console.log(this.sharedVariables)
@@ -802,7 +847,7 @@ function getDeepModel({
                 math: math, graph: graph, session: session, nPredictions: nPredictions,
                 hiddenSize: hiddenSize, inputSize: inputSize,
                 seqLength: seqLength,
-                weightValues: null
+                weightValues: init_weights
             });
             break;
         case 'LSTM':
@@ -811,7 +856,7 @@ function getDeepModel({
                 graph: graph, session: session, nPredictions: outputSize,
                 hiddenSize: hiddenSize, inputSize: inputSize,
                 seqLength: 1,
-                weightValues: null
+                weightValues: init_weights
             });
             break;
         case 'FFN1D':

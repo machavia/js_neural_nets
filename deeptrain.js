@@ -22,6 +22,8 @@ if(typeof(require) === 'function'){
 }else{
     
     doBatch = deep_batch_train.doBatch;
+    setOptimizerParams = deep_batch_train.setOptimizerParams;
+    getOptimizerParams = deep_batch_train.getOptimizerParams;
     Feeder = deepmodels.Feeder;
     prepareFeed = deepmodels.prepareFeed;
     getOptimizer = deepmodels.getOptimizer;
@@ -46,6 +48,7 @@ if(typeof(require) === 'function'){
 // Start of module boilerplate, insures that code is useable both
 // on server side and client side
 (function(exports){
+
 
 
 async function deepTrain({
@@ -106,7 +109,8 @@ async function deepTrain({
     if (model === null){
         deeplearn.ENV.setMath(new deeplearn.NDArrayMath('cpu', false))
         math = ENV.math;
-    } // else{ math = model.math; }
+    }
+    // else{ math = model.math; }
     // math.enableDebugMode();
 
     // weights =
@@ -124,12 +128,16 @@ async function deepTrain({
             // NOTE model is already provided if we are here
             optimizer = getOptimizer(optimizerType, learningRate, momentum);}
 
+        let weightInit = null;
+        let optimizerParams = null;
+
         for (let iter = 0; iter < iterations; iter++) {
 
             if(modelByBatch && optimizerByBatch){
                 feedEntries = null;
                 optimizer = null;
                 model = null;
+                modelParams["init_weights"] = weightInit;
             }
 
             let args = {
@@ -152,7 +160,8 @@ async function deepTrain({
                 optimizerType: optimizerType,
                 printInfo: printInfo,
                 session: session,
-                xProvider: xProvider
+                xProvider: xProvider,
+                optimizerParams: optimizerParams
             }
 
             /*
@@ -189,15 +198,18 @@ async function deepTrain({
             ret = await doBatch(args);
             [feedEntries, optimizer, model] = ret;
 
+            if(modelByBatch && optimizerByBatch){
+                weightInit = model.getWeightsValues();
+                let data = model.math.backend.data;
+                optimizerParams = getOptimizerParams(optimizer, data);
+            }
+
             debug.feedEntries = feedEntries;
             debug.optimizer = optimizer;
             debug.model = model;
             debug.weights = model.getWeightsValues();
+            debug.optimizerParams = optimizerParams;
 
-            // Set proxy variables
-            gradientsDict = optimizer.
-                accumulatedSquaredGradients.dict;
-            data = model.math.backend.data
 
             // get Square Gradients A and variables values with Names
             /*

@@ -20,6 +20,33 @@ if(typeof(require) === 'function'){
 // on server side and client side
 (function(exports){
 
+function getOptimizerParams(optimizer, data){
+
+    // Set proxy variables
+    gradientsDict = optimizer.accumulatedSquaredGradients.dict;
+
+    const nameToParamValue = {};
+
+    for(node of optimizer.variableNodes){
+        let sqGradForNode = gradientsDict[node.id];
+        nameToParamValue[node.name] = data[sqGradForNode.dataId];
+    }
+
+    return(nameToParamValue);
+}
+
+function setOptimizerParams(optimizer, nameToParamValue, data){
+
+    // Set proxy variables
+    gradientsDict = optimizer.accumulatedSquaredGradients.dict;
+
+    for(node of optimizer.variableNodes){
+        let sqGradForNode = gradientsDict[node.id];
+        data[sqGradForNode.dataId] = nameToParamValue[node.name];
+    }
+
+}
+
 
 async function doBatch({
     batchSize,
@@ -41,14 +68,19 @@ async function doBatch({
     optimizerType,
     printInfo,
     session,
-    xProvider
+    xProvider,
+    optimizerParams=null
 }){
 
     // we can chose to keep the same model / optimizer accross batches
     // or
     // we can chose to have a new model / optimizer for each batch
     if(modelByBatch){
+
         model = getDeepModel(modelParams);
+
+        console.log("init_weights:", modelParams.init_weights)
+
         feeder.math = model.math;
         [xProvider, lProvider] = feeder.next();
     }
@@ -60,16 +92,9 @@ async function doBatch({
         optimizer = getOptimizer(optimizerType, learningRate, momentum);
     }
 
-    debug.xProvider = xProvider;
-    debug.lProvider = lProvider;
-    debug.model = model;
-    debug.optimizer = optimizer;
-
     // console.log(model, optimizer);
-
     if (modelByBatch){
-        feedEntries = prepareFeed(model, xProvider, lProvider);
-    }
+        feedEntries = prepareFeed(model, xProvider, lProvider);}
 
     // Train takes a cost tensor to minimize. Trains one batch. Returns the
     // average cost as a Scalar.
@@ -80,7 +105,8 @@ async function doBatch({
                 Array2D.new(model.x.shape, ds[i].input);
             let target = ds[i].output; 
             let pred = session.eval(
-                model.output, [{tensor: model.x, data: input}]
+                model.output,
+                [{tensor: model.x, data: input}]
             );
             try {
                 console.log("p:", pred.dataSync(), "t:", target);
@@ -90,9 +116,17 @@ async function doBatch({
         }
     }
 
-    const cost = model.session.trainMod(
-        model.cost, feedEntries, batchSize, optimizer,
-        CostReduction.MEAN);
+    let [runtime, feed] = model.session.trainModStart(
+        model.cost, feedEntries, batchSize, optimizer)
+
+    let data = model.math.backend.data;
+    if(modelByBatch && optimizerParams !== null){
+        setOptimizerParams(optimizer, optimizerParams, data);
+    }
+    console.log(getOptimizerParams(optimizer, data))
+
+    const cost = model.session.trainModEnd(
+        runtime, feed, model.cost, batchSize, optimizer, CostReduction.MEAN)
 
     try { costVal = await cost.val(); }
     catch(e){console.log("Error at await", e);}
@@ -118,6 +152,8 @@ async function doBatch({
 
 // END of export boiler plate
 exports.doBatch = doBatch;
+exports.getOptimizerParams = getOptimizerParams;
+exports.setOptimizerParams = setOptimizerParams;
 })(
     typeof exports === 'undefined'?  this['deep_batch_train']={}: exports
 );
