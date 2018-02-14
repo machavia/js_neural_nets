@@ -1,3 +1,11 @@
+if(typeof(require) === 'function'){
+
+}else{
+    
+    prepareFeed = deepmodels.prepareFeed;
+
+}
+
 // Start of module boilerplate, insures that code is useable both
 // on server side and client side
 (function(exports){
@@ -29,43 +37,67 @@ function setOptimizerParams(optimizer, nameToParamValue, data){
 
 }
 
-async function doBatchFromScratch(
+async function doBatchFromScratch({
     batchSize,
-    feeder,
+    x,
+    xShape,
+    y,
     iter,
     learningRate,
-    model,
     modelParams,
     momentum,
     optimizerType,
     optimizerParams=null
-){
+}){
 
     let model = getDeepModel(modelParams);
-    feeder.math = model.math;
-    [xProvider, lProvider] = feeder.next();
+    math = model.math;
 
-    optimizer = getOptimizer(optimizerType, learningRate, momentum);
+    return await math.scope(async () => {
 
-    let feedEntries = prepareFeed(model, xProvider, lProvider);
+        optimizer = getOptimizer(optimizerType, learningRate, momentum);
 
-    let [runtime, feed] = model.session.trainModStart(
-        model.cost, feedEntries, batchSize, optimizer)
+        let xArrays = [];
+        let yArrays = [];
 
-    let data = model.math.backend.data;
+        for(let i = 0; i < x.length; i++){
+            let xArray = Array2D.new(xShape, x[i]);
+            let yArray = Array1D.new(y[i]);
+            xArrays.push(xArray);
+            yArrays.push(yArray);
+        }
 
-    if(optimizerParams !== null){
-        setOptimizerParams(optimizer, optimizerParams, data);}
+        // Shuffles inputs and labels and keeps them mutually in sync.
+        shuffledInputProviderBuilder =
+            new InCPUMemoryShuffledInputProviderBuilderExtended(
+                [xArrays, yArrays]);
+        [xProvider, lProvider] =
+            shuffledInputProviderBuilder.getInputProviders();
+        let feedEntries = prepareFeed(model, xProvider, lProvider);
 
-    const cost = model.session.trainModEnd(
-        runtime, feed, model.cost, batchSize, optimizer, CostReduction.MEAN)
 
-    try { costVal = await cost.val(); }
-    catch(e){console.log("Error at await", e);}
+        let [runtime, feed] = model.session.trainModStart(
+            model.cost, feedEntries, batchSize, optimizer);
 
-    console.log('last average cost (' + iter + '): ' + costVal);
+        let data = model.math.backend.data;
 
-    return([feedEntries, optimizer, model]);
+        if(optimizerParams !== null){
+            setOptimizerParams(optimizer, optimizerParams, data);}
+
+        const cost = model.session.trainModEnd(
+            runtime, feed, model.cost, batchSize, optimizer, CostReduction.MEAN)
+
+        try { costVal = await cost.val(); }
+        catch(e){console.log("Error at await", e);}
+
+        console.log('last average cost (' + iter + '): ' + costVal);
+
+        let weightInit = model.getWeightsValues();
+        optimizerParams = getOptimizerParams(optimizer, data);
+
+        // here you should jusrt return arrays nothing more
+        return([weightInit, optimizerParams]);
+    })
 }
 
 async function doBatch({
@@ -73,11 +105,9 @@ async function doBatch({
     feedEntries,
     iter,
     model,
-    momentum,
     optimizer,
     session,
 }){
-
 
     let [runtime, feed] = model.session.trainModStart(
         model.cost, feedEntries, batchSize, optimizer)
@@ -127,9 +157,9 @@ async function doCost(model, ds, session){
 }
 
 
-
 // END of export boiler plate
 exports.doBatch = doBatch;
+exports.doBatchFromScratch = doBatchFromScratch;
 exports.getOptimizerParams = getOptimizerParams;
 exports.setOptimizerParams = setOptimizerParams;
 })(

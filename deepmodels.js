@@ -722,6 +722,40 @@ class RNNShared{
     }
 }
 
+
+class DataFeeder{
+
+    constructor({ds, batchSize}){
+        this.ds = ds;
+        this.batchSize = batchSize;
+        this.index = 0;
+    }
+
+    next(){
+
+        let [x, labels] = [[], []];
+
+        for(let curr = 0; curr < this.batchSize; curr++){
+            if (this.index == this.ds.length){this.index = 0;}
+            let dat = this.ds[this.index];
+
+            let xItem = dat.input;
+            let lItem = dat.output;
+
+            x.push(xItem);
+            labels.push(lItem);
+
+            this.index++;
+        }
+
+        let toReturn = [x, labels];
+
+        return(toReturn);
+    }
+
+}
+
+
 class Feeder{
 
     constructor({
@@ -738,7 +772,7 @@ class Feeder{
         this.index = 0;
         this.addState = addState;
         this.math = math;
-        this.allocated = [];
+        // this.allocated = [];
     }
 
     next(){
@@ -753,8 +787,6 @@ class Feeder{
             let feedEntries = [];
 
             let shuffledInputProviderBuilder = [];
-            let [xProvider, hProvider, cProvider, lProvider] = []
-            let [xFeed, hFeed, cFeed, lFeed] = []
 
             for(let curr = 0; curr < this.batchSize; curr++){
                 if (this.index == this.ds.length){this.index = 0;}
@@ -778,14 +810,14 @@ class Feeder{
                     }
                 }
 
-                this.allocated.push(xItem);
-                this.allocated.push(lItem);
+                // this.allocated.push(xItem);
+                // this.allocated.push(lItem);
                 x.push(xItem);
                 labels.push(lItem);
 
                 if (this.addState){
-                    this.allocated.push(hItem);
-                    this.allocated.push(cItem);
+                    // this.allocated.push(hItem);
+                    // this.allocated.push(cItem);
                     h.push(hItem);
                     c.push(cItem);
                 }
@@ -799,12 +831,8 @@ class Feeder{
             shuffledInputProviderBuilder =
                 new InCPUMemoryShuffledInputProviderBuilder(toGet);
 
-            // debug.shuffledInputProvider = shuffledInputProviderBuilder;
-
             let toReturn = 
                 shuffledInputProviderBuilder.getInputProviders();
-
-            // return(toReturn);
 
             return(toReturn);
         // }))
@@ -958,6 +986,7 @@ exports.LSTMCellShared = LSTMCellShared;
 exports.RNNShared = RNNShared;
 exports.getDeepModel = getDeepModel;
 exports.Feeder = Feeder; // TODO should be in a "data" module
+exports.DataFeeder = DataFeeder; // TODO should be in a "data" module
 exports.getOptimizer= getOptimizer;
 exports.prepareFeed = prepareFeed;
 exports.dsToDeepDS = dsToDeepDS;

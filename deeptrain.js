@@ -23,6 +23,7 @@ if(typeof(require) === 'function'){
     getOptimizerParams = deep_batch_train.getOptimizerParams;
 
     Feeder = deepmodels.Feeder;
+    DataFeeder = deepmodels.DataFeeder;
     prepareFeed = deepmodels.prepareFeed;
     getOptimizer = deepmodels.getOptimizer;
     getDeepModel = deepmodels.getDeepModel;
@@ -73,14 +74,13 @@ async function deepTrain({
 
     // await firstLearn();
     let [
-        feeder, graph, session, xFeed, lFeed, feedEntries, x_check, l_check,
-        optimizer
-    ] = [null, null, null, null, null, null, null, null, null]
+        dataFeeder, graph, session, xFeed, lFeed, feedEntries, x_check, l_check,
+        optimizer, seqLen, dim
+    ] = [null, null, null, null, null, null, null, null, null, null, null]
 
     let [ds, xProvider, lProvider] = [
         null, null, null, null, null
     ]
-
 
     if (model === null){
         deeplearn.ENV.setMath(new deeplearn.NDArrayMath('cpu', true))
@@ -90,7 +90,13 @@ async function deepTrain({
 
     if (modelByBatch){
         dsParameters.batchSize = batchSize;
-        feeder = new Feeder(dsParameters);
+        dataFeeder = new DataFeeder({
+            ds: dsParameters.ds,
+            batchSize: dsParameters.batchSize,
+            index: 0
+        });
+        seqLen = dsParameters.seqLen;
+        dim = dsParameters.dim;
     }else{
         [ds, xProvider, , , lProvider] = dsProviders;
     }
@@ -103,7 +109,6 @@ async function deepTrain({
     // else{ math = model.math; }
     // math.enableDebugMode();
 
-    // weights =
     await math.scope(async () => {
 
         if(! modelByBatch){
@@ -120,6 +125,7 @@ async function deepTrain({
 
         let weightInit = null;
         let optimizerParams = null;
+        let ret = null;
 
         for (let iter = 0; iter < iterations; iter++) {
 
@@ -130,9 +136,28 @@ async function deepTrain({
                 modelParams["init_weights"] = weightInit;
             }
 
+            let [x, y] = dataFeeder.next();
+
             let args = {};
             let batchFunc = null;
             if (modelByBatch && optimizerByBatch){
+                args = {
+                    batchSize: batchSize,
+                    x: x,
+                    xShape: [seqLen, dim],
+                    y: y,
+                    iter: iter,
+                    learningRate: learningRate,
+                    modelParams: modelParams,
+                    momentum: momentum,
+                    optimizerType: optimizerType,
+                    optimizerParams: optimizerParams
+                };
+
+                ret = await doBatchFromScratch(args);
+                [weightInit, optimizerParams] = ret;
+            }
+            else{
                 args = {
                     batchSize: batchSize,
                     feedEntries: feedEntries,
@@ -141,31 +166,12 @@ async function deepTrain({
                     optimizer: optimizer,
                     session: session
                 };
-                batchFunc = doBatchFromScratch;
-            }
-            else{
-                args = {
-                    batchSize: batchSize,
-                    feeder: feeder,
-                    iter: iter,
-                    learningRate: learningRate,
-                    model: model,
-                    modelParams: modelParams,
-                    momentum: momentum,
-                    optimizerType: optimizerType,
-                    optimizerParams: optimizerParams
-                };
-                batchFunc = doBatch;
+                ret = await doBatch(args);
+                [feedEntries, optimizer, model] = ret;
             }
 
-            ret = await batchFunc(args);
-            [feedEntries, optimizer, model] = ret;
-
-            if(modelByBatch && optimizerByBatch){
-                weightInit = model.getWeightsValues();
-                let data = model.math.backend.data;
-                optimizerParams = getOptimizerParams(optimizer, data);
-            }
+            debug.weightInit = weightInit;
+            debug.optimizerParams = optimizerParams;
 
             /*
             debug.feedEntries = feedEntries;
